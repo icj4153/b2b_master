@@ -8,7 +8,17 @@ B2B 도매처 상품 엑셀을 자동 수집하고, 상품명/가격 정보를 �
 - `season_analyzer.py`: 통합 데이터에 제철 키워드/월 정보 추가
 - `web_page.py`: Streamlit 분석 대시보드
 - `env_utils.py`: `.env` 환경변수 로더
+- `b2b_list/*.txt`: 업체별 다운로드/링크 설정
 - `.env.example`: 필요한 환경변수 예시
+
+## 업체 설정 파일
+
+`b2b_excel.py`는 업체 정보를 코드에 직접 입력하지 않고 아래 파일에서 읽습니다.
+
+- `b2b_list/b2b_admin.txt`: `ADMIN_PLUS_COMPANIES`
+- `b2b_list/b2b_google_sheet.txt`: `GOOGLE_SHEET_COMPANIES`
+- `b2b_list/b2b_baljuora.txt`: `BALJUORA_COMPANIES`
+- `b2b_list/b2b_direct.txt`: `DIRECT_DOWNLOAD_COMPANIES`
 
 ## 설치
 

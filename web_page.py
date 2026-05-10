@@ -3,7 +3,9 @@ import pandas as pd
 import os
 import urllib.request
 import json
+import ast
 from datetime import datetime, timedelta
+from pathlib import Path
 import altair as alt
 import re
 from env_utils import get_env
@@ -17,6 +19,61 @@ st.set_page_config(page_title="제철한가득 소싱 마스터", layout="wide")
 NAVER_CLIENT_ID = get_env("NAVER_CLIENT_ID", "")
 NAVER_CLIENT_SECRET = get_env("NAVER_CLIENT_SECRET", "")
 # ---------------------------------------------------------
+
+GOOGLE_EXPORT_RE = re.compile(
+    r"https://docs\.google\.com/spreadsheets/d/([^/]+)/export\?gid=([^#&]+)"
+)
+
+
+def normalize_supplier_name(name):
+    return str(name).split("_")[0].strip()
+
+
+def normalize_company_link(url):
+    match = GOOGLE_EXPORT_RE.match(str(url))
+    if match:
+        sheet_id, gid = match.groups()
+        return f"https://docs.google.com/spreadsheets/d/{sheet_id}/edit?gid={gid}#gid={gid}"
+    return url
+
+
+@st.cache_data
+def load_supplier_links():
+    base_dir = Path(__file__).resolve().parent
+    source_files = {
+        "b2b_admin.txt": "ADMIN_PLUS_COMPANIES",
+        "b2b_google_sheet.txt": "GOOGLE_SHEET_COMPANIES",
+        "b2b_baljuora.txt": "BALJUORA_COMPANIES",
+        "b2b_direct.txt": "DIRECT_DOWNLOAD_COMPANIES",
+    }
+    links = {}
+
+    for filename, variable_name in source_files.items():
+        candidates = [base_dir / filename, base_dir / "b2b_list" / filename]
+        source_path = next((path for path in candidates if path.exists()), None)
+        if source_path is None:
+            continue
+
+        tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=str(source_path))
+        for node in tree.body:
+            if not isinstance(node, ast.Assign):
+                continue
+            if not any(isinstance(t, ast.Name) and t.id == variable_name for t in node.targets):
+                continue
+            try:
+                companies = ast.literal_eval(node.value)
+            except (ValueError, SyntaxError):
+                break
+
+            for company in companies:
+                name = company.get("name")
+                url = company.get("link_url") or company.get("homepage_url") or company.get("url")
+                if name and url:
+                    links[normalize_supplier_name(name)] = normalize_company_link(url)
+            break
+
+    return links
+
 
 # 1. 데이터 로드 함수
 @st.cache_data
@@ -110,6 +167,7 @@ def analyze_graph_pattern(trend_df, keyword):
 def render_analysis_page(df):
     st.title("🍎 제철한가득 AI 소싱 마스터 v3.8")
     st.header("📅 월간 제철 캘린더 & 🤖 맞춤 전략 발굴기")
+    supplier_links = load_supplier_links()
     
     selected_month = st.select_slider(
         "소싱 달 선택", options=[f"{i}월" for i in range(1, 13)],
@@ -224,11 +282,23 @@ def render_analysis_page(df):
                 final_df['순수익'] = (target_price - final_df['공급가'] - fee_amount).astype(int)
                 final_df['마진율'] = ((final_df['순수익'] / target_price) * 100).round(1)
 
+            final_df['공급사 홈페이지'] = final_df['공급사'].map(
+                lambda name: supplier_links.get(normalize_supplier_name(name), "")
+            )
+            display_columns = ['등급','크기','중량','과수','공급가','공급사','공급사 홈페이지','상품명']
+            if '순수익' in final_df.columns:
+                display_columns.extend(['순수익','마진율'])
+            display_columns = [c for c in display_columns if c in final_df.columns]
+
             st.write(f"### 📋 {view_title} (총 {len(final_df):,}개)")
-            st.dataframe(final_df.sort_values(by='공급가'), width='stretch', height=400,
+            st.dataframe(final_df.sort_values(by='공급가')[display_columns], width='stretch', height=400,
                 column_config={"공급가": st.column_config.NumberColumn(format="%d 원"),
                                "순수익": st.column_config.NumberColumn(format="%d 원"),
-                               "마진율": st.column_config.NumberColumn(format="%.1f %%")})
+                               "마진율": st.column_config.NumberColumn(format="%.1f %%"),
+                               "공급사 홈페이지": st.column_config.LinkColumn(
+                                   "공급사 홈페이지",
+                                   display_text="열기"
+                               )})
     else: st.info("👆 상단에서 상품을 선택하거나 검색해 주세요.")
 
 # ---------------------------------------------------------

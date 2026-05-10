@@ -1,3 +1,4 @@
+GOOGLE_SHEET_COMPANIES = [
     {
         "name": "성공푸드-선물세트",
         "url": "https://docs.google.com/spreadsheets/d/1aRW86p7PIl9wdFoMhPmMWjfxJ2zA74_9nRbgR9j59Rs/export?gid=509215400#gid=509215400"
@@ -107,3 +108,4 @@
         "url": "https://docs.google.com/spreadsheets/d/1R6iviy3KXjEdK4zknX_2NbVTLiYa0yHZx65XUxSXPeM/export?gid=353676437#gid=353676437"
     }
     
+]
