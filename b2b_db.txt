@@ -1,0 +1,5 @@
+    {
+        "name": "대봉유통", 
+        "url": "https://www.daebong.net/product", 
+        "btn_text": "전체 데이터 엑셀 다운로드"
+    }
