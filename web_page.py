@@ -72,7 +72,24 @@ def normalize_weight_text(value):
     if not text:
         return text
 
-    return re.sub(r"(?i)(\d[\d.,]*)\s*k\s*g\b", r"\1kg", text)
+    def replace_weight(match):
+        number_text = match.group(1).replace(",", "")
+        normalized_number = f"{float(number_text):g}"
+        return f"{normalized_number}kg"
+
+    return re.sub(r"(?i)(\d[\d.,]*)\s*k\s*g\b", replace_weight, text)
+
+
+def weight_sort_key(value):
+    text = str(value).strip()
+    match = re.search(r"(?i)(\d[\d.,]*)\s*(kg|g)\b", text)
+    if not match:
+        return (1, float("inf"), text)
+
+    number = float(match.group(1).replace(",", ""))
+    unit = match.group(2).lower()
+    grams = number * 1000 if unit == "kg" else number
+    return (0, grams, text)
 
 
 @st.cache_data
@@ -444,13 +461,18 @@ def render_analysis_page(df):
 
         if not base_df.empty:
             if selected_suppliers: base_df = base_df[base_df['공급사'].isin(selected_suppliers)]
+            if '중량' in base_df.columns:
+                base_df['중량'] = base_df['중량'].apply(normalize_weight_text)
             
             # 등급/크기/중량 등 정밀 필터링 (원본 완벽 복원)
             grades = sorted([x for x in base_df['등급'].unique() if str(x) != 'nan'])
             sel_grades = st.sidebar.multiselect("⭐ 등급 선택", grades, default=grades)
             sizes = sorted([x for x in base_df['크기'].unique() if str(x) != 'nan'])
             sel_sizes = st.sidebar.multiselect("📏 크기 선택", sizes, default=sizes)
-            weights = sorted([x for x in base_df['중량'].unique() if str(x) != 'nan'])
+            weights = sorted(
+                [x for x in base_df['중량'].unique() if str(x) != 'nan'],
+                key=weight_sort_key
+            )
             sel_weights = st.sidebar.multiselect("⚖️ 중량 선택", weights, default=weights)
 
             st.sidebar.divider()
