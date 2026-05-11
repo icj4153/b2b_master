@@ -36,7 +36,7 @@ services:
     env_file:
       - .env
     ports:
-      - "8501:8501"
+      - "127.0.0.1:8501:8501"
     volumes:
       - ./b2b_list:/app/b2b_list:ro
       - ./output:/app/output:ro
