@@ -206,6 +206,139 @@ def analyze_graph_pattern(trend_df, keyword):
         else: status = "📉 비시즌 바닥 구간"
     return pattern, status
 
+
+CATEGORY_ORDER = ["과일", "수산물", "야채", "축산", "김치/기타"]
+CATEGORY_STYLES = {
+    "과일": {"bg": "#F7C9C6", "border": "#E88A84", "text": "#7C2520"},
+    "수산물": {"bg": "#C8DDF4", "border": "#7FA8D8", "text": "#1E4F82"},
+    "야채": {"bg": "#CFE6C8", "border": "#8FBE80", "text": "#2E6532"},
+    "축산": {"bg": "#F3CFDA", "border": "#D98BA6", "text": "#7A2943"},
+    "김치/기타": {"bg": "#F1D8BC", "border": "#D9A870", "text": "#6E421B"},
+}
+CATEGORY_SLUGS = {
+    "과일": "fruit",
+    "수산물": "seafood",
+    "야채": "vegetable",
+    "축산": "meat",
+    "김치/기타": "etc",
+}
+CATEGORY_KEYWORDS = {
+    "과일": [
+        "참다래", "수박", "참외", "성주 참외", "복숭아", "신비복숭아", "자두", "블루베리",
+        "복분자", "포도", "거봉", "체리", "메론", "멜론", "샤인머스캣", "홍로", "부사",
+        "사과", "배", "단감", "홍시", "곶감", "레드키위", "골드키위", "무화과", "감귤",
+        "귤", "한라봉", "천혜향", "레드향", "황금향", "설향", "딸기", "타이벡",
+    ],
+    "수산물": [
+        "주꾸미", "바지락", "멍게", "장어", "전복", "오징어", "대하", "새우", "전어",
+        "꽃게", "굴", "과메기", "방어", "꼬막", "가리비", "석화",
+    ],
+    "야채": [
+        "눈개승마", "두릅", "미나리", "대저토마토", "짭짤이토마토", "봄동", "달래",
+        "냉이", "초당옥수수", "찰옥수수", "햇감자", "감자", "고구마", "호박고구마",
+        "밤고구마", "꿀고구마", "생강", "표고버섯", "송이버섯", "늙은호박", "콜라비",
+        "시금치", "우엉",
+    ],
+    "축산": [
+        "한우", "소고기", "돼지고기", "닭고기", "오리고기", "계란", "달걀", "갈비",
+        "삼겹살", "목살", "사골", "우족", "양념육",
+    ],
+    "김치/기타": ["동치미", "김치", "밤", "땅콩", "기타/상시"],
+}
+KEYWORD_CATEGORY_MAP = {
+    keyword: category
+    for category, keyword_list in CATEGORY_KEYWORDS.items()
+    for keyword in keyword_list
+}
+
+
+def get_keyword_category(keyword):
+    keyword = str(keyword)
+    if keyword in KEYWORD_CATEGORY_MAP:
+        return KEYWORD_CATEGORY_MAP[keyword]
+
+    for category, keyword_list in CATEGORY_KEYWORDS.items():
+        if any(base_keyword in keyword for base_keyword in keyword_list):
+            return category
+    return "김치/기타"
+
+
+def group_keywords_by_category(keywords):
+    grouped = {category: [] for category in CATEGORY_ORDER}
+    for keyword in keywords:
+        grouped[get_keyword_category(keyword)].append(keyword)
+    return grouped
+
+
+def render_keyword_category_buttons(keywords):
+    st.write("#### 카테고리별 제철 상품")
+    grouped_keywords = group_keywords_by_category(keywords)
+
+    if st.session_state.get("selected_keyword_category") not in CATEGORY_ORDER:
+        st.session_state.selected_keyword_category = next(
+            (category for category in CATEGORY_ORDER if grouped_keywords[category]),
+            CATEGORY_ORDER[0],
+        )
+
+    selected_category = st.session_state.selected_keyword_category
+    base_selectors = []
+    selected_rules = []
+    for category in CATEGORY_ORDER:
+        selector = f".st-key-category-{CATEGORY_SLUGS[category]} button"
+        base_selectors.append(selector)
+        if selected_category != category:
+            continue
+        style = CATEGORY_STYLES[category]
+        selected_rules.append(
+            f"""
+            {selector} {{
+                background-color: {style["bg"]} !important;
+                border-color: {style["border"]} !important;
+                color: {style["text"]} !important;
+                font-weight: 700 !important;
+            }}
+            {selector} * {{
+                color: {style["text"]} !important;
+                font-weight: 700 !important;
+            }}
+            """
+        )
+
+    st.markdown(
+        f"""
+        <style>
+        {", ".join(base_selectors)} {{
+            min-height: 38px;
+            border-radius: 6px !important;
+            transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+        }}
+        {"".join(selected_rules)}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    category_cols = st.columns(len(CATEGORY_ORDER))
+    for category, col in zip(CATEGORY_ORDER, category_cols):
+        count = len(grouped_keywords[category])
+        with col.container(key=f"category-{CATEGORY_SLUGS[category]}"):
+            if st.button(f"{category} ({count})", width='stretch', key=f"category_button_{CATEGORY_SLUGS[category]}"):
+                st.session_state.selected_keyword_category = category
+                st.rerun()
+
+    selected_keywords = grouped_keywords[selected_category]
+    st.caption(f"현재 선택: {selected_category} · 상품 {len(selected_keywords)}개")
+
+    if not selected_keywords:
+        st.info("선택한 카테고리에 해당하는 제철 상품이 없습니다.")
+        return
+
+    item_cols = st.columns(6)
+    for i, keyword in enumerate(selected_keywords):
+        if item_cols[i % 6].button(keyword, width='stretch', key=f"grid_{selected_category}_{keyword}"):
+            st.session_state.clicked_kw = keyword
+
+
 # ---------------------------------------------------------
 # 📊 페이지 1: 실전 소싱 분석 (오리지널 복원)
 # ---------------------------------------------------------
@@ -253,10 +386,7 @@ def render_analysis_page(df):
 
     st.divider()
     if keywords:
-        cols = st.columns(6)
-        for i, kw in enumerate(keywords):
-            if cols[i % 6].button(kw, width='stretch', key=f"grid_{kw}"):
-                st.session_state.clicked_kw = kw
+        render_keyword_category_buttons(keywords)
     st.divider()
 
     # --- 여기서부터 사장님의 '진짜 원본' 핵심 필터 및 계산기 복원 ---
