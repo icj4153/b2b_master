@@ -47,9 +47,11 @@ GOOGLE_SHEET_COMPANIES = load_company_config("b2b_google_sheet.txt", "GOOGLE_SHE
 BALJUORA_COMPANIES = load_company_config("b2b_baljuora.txt", "BALJUORA_COMPANIES")
 DIRECT_DOWNLOAD_COMPANIES = load_company_config("b2b_direct.txt", "DIRECT_DOWNLOAD_COMPANIES")
 
-DOWNLOAD_DIR = "b2b_downloads"
+DOWNLOAD_DIR = os.getenv("B2B_DOWNLOAD_DIR", str(BASE_DIR / "b2b_downloads"))
+OUTPUT_DIR = Path(os.getenv("B2B_OUTPUT_DIR", str(BASE_DIR)))
+OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 TARGET_BTN_TEXT = "전체제품 엑셀 다운로드"
-OUTPUT_FILE = f"전체품목_통합데이터_{datetime.now().strftime('%Y%m%d')}.xlsx"
+OUTPUT_FILE = str(OUTPUT_DIR / f"전체품목_통합데이터_{datetime.now().strftime('%Y%m%d')}.xlsx")
 BROWSER_DOWNLOAD_CONCURRENCY = 3
 GOOGLE_SHEET_CONCURRENCY = 8
 BALJUORA_DOWNLOAD_CONCURRENCY = 2

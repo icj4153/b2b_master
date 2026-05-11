@@ -1,0 +1,9 @@
+.git
+.vscode
+__pycache__
+*.pyc
+*.xlsx
+~$*.xlsx
+b2b_downloads
+output
+.env
