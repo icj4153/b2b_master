@@ -30,6 +30,8 @@ services:
       - --server.port=8501
       - --server.headless=true
       - --browser.gatherUsageStats=false
+      - --server.enableCORS=false
+      - --server.enableXsrfProtection=false
     environment:
       TZ: KST-9
       B2B_OUTPUT_DIR: /app/output
