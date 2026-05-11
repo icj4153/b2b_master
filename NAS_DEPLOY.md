@@ -70,3 +70,11 @@ NAS 폴더가 GitHub clone 기반이면 아래 명령으로 최신 코드를 받
 cd /volume1/docker/b2b_excel
 sh nas_update.sh
 ```
+
+## 8. 웹서비스 접속
+
+Streamlit 웹서비스는 NAS의 8501 포트로 실행됩니다.
+
+```text
+http://192.168.50.101:8501
+```

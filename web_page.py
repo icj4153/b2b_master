@@ -18,6 +18,8 @@ st.set_page_config(page_title="제철한가득 소싱 마스터", layout="wide")
 # ---------------------------------------------------------
 NAVER_CLIENT_ID = get_env("NAVER_CLIENT_ID", "")
 NAVER_CLIENT_SECRET = get_env("NAVER_CLIENT_SECRET", "")
+BASE_DIR = Path(__file__).resolve().parent
+OUTPUT_DIR = Path(os.getenv("B2B_OUTPUT_DIR", str(BASE_DIR / "output")))
 # ---------------------------------------------------------
 
 GOOGLE_EXPORT_RE = re.compile(
@@ -77,11 +79,29 @@ def load_supplier_links():
 
 # 1. 데이터 로드 함수
 @st.cache_data
+def find_data_file():
+    candidates = []
+    if OUTPUT_DIR.exists():
+        candidates.extend(OUTPUT_DIR.glob("전체품목_통합데이터_*.xlsx"))
+
+    candidates.extend(
+        BASE_DIR / filename
+        for filename in [
+            "통합_단가표_제철분석.xlsx",
+            "통합_단가표.xlsx",
+        ]
+    )
+
+    existing_files = [path for path in candidates if path.exists()]
+    if not existing_files:
+        return None
+    return max(existing_files, key=lambda path: path.stat().st_mtime)
+
+
+@st.cache_data
 def load_data():
-    file_path = "통합_단가표_제철분석.xlsx"
-    if not os.path.exists(file_path):
-        file_path = "통합_단가표.xlsx"
-    if os.path.exists(file_path):
+    file_path = find_data_file()
+    if file_path:
         df = pd.read_excel(file_path, dtype=str)
         if '공급가' in df.columns:
             df['공급가'] = pd.to_numeric(df['공급가'], errors='coerce').fillna(0).astype(int)

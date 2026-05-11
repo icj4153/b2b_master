@@ -17,3 +17,26 @@ services:
       - ./b2b_list:/app/b2b_list:ro
       - ./b2b_downloads:/app/b2b_downloads
       - ./output:/app/output
+
+  b2b-web:
+    build: .
+    container_name: b2b-excel-web
+    restart: unless-stopped
+    command:
+      - streamlit
+      - run
+      - web_page.py
+      - --server.address=0.0.0.0
+      - --server.port=8501
+      - --server.headless=true
+      - --browser.gatherUsageStats=false
+    environment:
+      TZ: KST-9
+      B2B_OUTPUT_DIR: /app/output
+    env_file:
+      - .env
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./b2b_list:/app/b2b_list:ro
+      - ./output:/app/output:ro
