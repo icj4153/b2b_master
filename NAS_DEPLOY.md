@@ -61,3 +61,12 @@ PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin /usr/local/bin/docker-compose 
 cd /volume1/docker/b2b_excel
 PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin /usr/local/bin/docker-compose logs -f b2b-excel
 ```
+
+## 7. GitHub에서 최신 코드 반영
+
+NAS 폴더가 GitHub clone 기반이면 아래 명령으로 최신 코드를 받고 컨테이너를 다시 빌드합니다.
+
+```bash
+cd /volume1/docker/b2b_excel
+sh nas_update.sh
+```
