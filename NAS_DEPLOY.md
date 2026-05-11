@@ -13,6 +13,7 @@ B2B_USER_ID=...
 B2B_USER_PW=...
 NAVER_CLIENT_ID=...
 NAVER_CLIENT_SECRET=...
+B2B_WEB_PASSWORD=...
 ```
 
 ## 2. 실행
@@ -71,7 +72,11 @@ cd /volume1/docker/b2b_excel
 sh nas_update.sh
 ```
 
-## 8. 웹서비스 접속
+## 8. 외부 접속
+
+Streamlit 웹서비스는 컨테이너에서 8501 포트로 실행됩니다. 외부 공개 시에는 공유기에서 NAS로 포트포워딩하거나 Synology DDNS와 Reverse Proxy를 사용합니다. `B2B_WEB_PASSWORD`를 반드시 설정한 뒤 공개하세요.
+
+## 9. 웹서비스 접속
 
 Streamlit 웹서비스는 NAS의 8501 포트로 실행됩니다.
 

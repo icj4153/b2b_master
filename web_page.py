@@ -4,6 +4,7 @@ import os
 import urllib.request
 import json
 import ast
+import hmac
 from datetime import datetime, timedelta
 from pathlib import Path
 import altair as alt
@@ -21,6 +22,30 @@ NAVER_CLIENT_SECRET = get_env("NAVER_CLIENT_SECRET", "")
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = Path(os.getenv("B2B_OUTPUT_DIR", str(BASE_DIR / "output")))
 # ---------------------------------------------------------
+
+
+def require_dashboard_password():
+    password = get_env("B2B_WEB_PASSWORD", "")
+    if not password:
+        return
+
+    if st.session_state.get("authenticated"):
+        return
+
+    with st.form("dashboard_login"):
+        entered = st.text_input("Password", type="password")
+        submitted = st.form_submit_button("Login")
+
+    if submitted and hmac.compare_digest(entered, password):
+        st.session_state.authenticated = True
+        st.rerun()
+
+    if submitted:
+        st.error("비밀번호가 올바르지 않습니다.")
+    st.stop()
+
+
+require_dashboard_password()
 
 GOOGLE_EXPORT_RE = re.compile(
     r"https://docs\.google\.com/spreadsheets/d/([^/]+)/export\?gid=([^#&]+)"
