@@ -14,6 +14,7 @@ cd "$APP_DIR"
   -v "$KEY_DIR:/root/.ssh" \
   alpine/git \
   -C /repo \
+  -c safe.directory=/repo \
   -c core.sshCommand="ssh -i /root/.ssh/github_deploy_key -o StrictHostKeyChecking=no" \
   pull --ff-only
 
