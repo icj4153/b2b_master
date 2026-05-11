@@ -64,6 +64,17 @@ def normalize_company_link(url):
     return url
 
 
+def normalize_weight_text(value):
+    if pd.isna(value):
+        return value
+
+    text = str(value).strip()
+    if not text:
+        return text
+
+    return re.sub(r"(?i)(\d[\d.,]*)\s*k\s*g\b", r"\1kg", text)
+
+
 @st.cache_data
 def load_supplier_links():
     base_dir = Path(__file__).resolve().parent
@@ -130,6 +141,8 @@ def load_data():
         df = pd.read_excel(file_path, dtype=str)
         if '공급가' in df.columns:
             df['공급가'] = pd.to_numeric(df['공급가'], errors='coerce').fillna(0).astype(int)
+        if '중량' in df.columns:
+            df['중량'] = df['중량'].apply(normalize_weight_text)
         return df
     return pd.DataFrame()
 
