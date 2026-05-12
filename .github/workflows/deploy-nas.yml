@@ -1,0 +1,71 @@
+name: Deploy NAS
+
+on:
+  push:
+    branches:
+      - main
+
+concurrency:
+  group: nas-deploy-main
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy to Synology NAS
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          missing=0
+          for name in NAS_HOST NAS_PORT NAS_USER NAS_SSH_PRIVATE_KEY NAS_KNOWN_HOSTS; do
+            if [ -z "${!name:-}" ]; then
+              echo "::error::Missing required GitHub Secret: $name"
+              missing=1
+            fi
+          done
+          exit "$missing"
+        env:
+          NAS_HOST: ${{ secrets.NAS_HOST }}
+          NAS_PORT: ${{ secrets.NAS_PORT }}
+          NAS_USER: ${{ secrets.NAS_USER }}
+          NAS_SSH_PRIVATE_KEY: ${{ secrets.NAS_SSH_PRIVATE_KEY }}
+          NAS_KNOWN_HOSTS: ${{ secrets.NAS_KNOWN_HOSTS }}
+
+      - name: Configure SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          printf '%s\n' "$NAS_SSH_PRIVATE_KEY" > ~/.ssh/nas_deploy_key
+          printf '%s\n' "$NAS_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/nas_deploy_key
+          chmod 644 ~/.ssh/known_hosts
+        env:
+          NAS_SSH_PRIVATE_KEY: ${{ secrets.NAS_SSH_PRIVATE_KEY }}
+          NAS_KNOWN_HOSTS: ${{ secrets.NAS_KNOWN_HOSTS }}
+
+      - name: Deploy on NAS
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh \
+            -i ~/.ssh/nas_deploy_key \
+            -p "$NAS_PORT" \
+            "$NAS_USER@$NAS_HOST" \
+            'set -eu
+             cd /volume1/docker/b2b_excel
+             sh nas_update.sh
+             PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin
+             /usr/local/bin/docker ps --filter name=b2b-excel
+             /usr/local/bin/docker-compose logs --tail=30 b2b-excel'
+        env:
+          NAS_HOST: ${{ secrets.NAS_HOST }}
+          NAS_PORT: ${{ secrets.NAS_PORT }}
+          NAS_USER: ${{ secrets.NAS_USER }}
