@@ -9,6 +9,7 @@ from pathlib import Path
 from openpyxl import load_workbook
 from playwright.async_api import async_playwright
 from env_utils import get_required_env
+from season_analyzer import add_seasonality_columns
 
 # [설정 1] 사장님 정보
 USER_ID = get_required_env("B2B_USER_ID")
@@ -416,8 +417,9 @@ def integrate_data():
         parsed_data = combined.apply(parse_product_info, axis=1)
         combined[['등급','크기','중량','과수','통합상품명']] = parsed_data
         combined['상품명'] = combined['통합상품명']
+        combined = add_seasonality_columns(combined)
         
-        cols = ['등급','크기','중량','과수','공급가','공급사','상품명']
+        cols = ['등급','크기','중량','과수','공급가','공급사','상품명','메인키워드','제철(월)']
         combined[[c for c in cols if c in combined.columns]].to_excel(OUTPUT_FILE, index=False)
         print(f"\n★ 데이터 통합 완료! 파일명: {OUTPUT_FILE}")
 
