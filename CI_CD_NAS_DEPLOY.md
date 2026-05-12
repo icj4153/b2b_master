@@ -9,6 +9,7 @@
 - NAS 앱 경로: `/volume1/docker/b2b_excel`
 - 외부 웹 주소: `https://icj7297.synology.me/`
 - SSH 배포 포트: `2022`
+- 자동 배포 트리거: `main` 브랜치 push
 
 ## GitHub Secrets
 
