@@ -64,34 +64,6 @@ def normalize_company_link(url):
     return url
 
 
-def normalize_weight_text(value):
-    if pd.isna(value):
-        return value
-
-    text = str(value).strip()
-    if not text:
-        return text
-
-    def replace_weight(match):
-        number_text = match.group(1).replace(",", "")
-        normalized_number = f"{float(number_text):g}"
-        return f"{normalized_number}kg"
-
-    return re.sub(r"(?i)(\d[\d.,]*)\s*k\s*g\b", replace_weight, text)
-
-
-def weight_sort_key(value):
-    text = str(value).strip()
-    match = re.search(r"(?i)(\d[\d.,]*)\s*(kg|g)\b", text)
-    if not match:
-        return (1, float("inf"), text)
-
-    number = float(match.group(1).replace(",", ""))
-    unit = match.group(2).lower()
-    grams = number * 1000 if unit == "kg" else number
-    return (0, grams, text)
-
-
 @st.cache_data
 def load_supplier_links():
     base_dir = Path(__file__).resolve().parent
@@ -133,19 +105,20 @@ def load_supplier_links():
 # 1. 데이터 로드 함수
 @st.cache_data
 def find_data_file():
-    candidates = []
     if OUTPUT_DIR.exists():
-        candidates.extend(OUTPUT_DIR.glob("전체품목_통합데이터_*.xlsx"))
+        output_files = list(OUTPUT_DIR.glob("전체품목_통합데이터_*.xlsx"))
+        if output_files:
+            return max(output_files, key=lambda path: path.stat().st_mtime)
 
-    candidates.extend(
+    legacy_candidates = [
         BASE_DIR / filename
         for filename in [
             "통합_단가표_제철분석.xlsx",
             "통합_단가표.xlsx",
         ]
-    )
+    ]
 
-    existing_files = [path for path in candidates if path.exists()]
+    existing_files = [path for path in legacy_candidates if path.exists()]
     if not existing_files:
         return None
     return max(existing_files, key=lambda path: path.stat().st_mtime)
@@ -158,10 +131,18 @@ def load_data():
         df = pd.read_excel(file_path, dtype=str)
         if '공급가' in df.columns:
             df['공급가'] = pd.to_numeric(df['공급가'], errors='coerce').fillna(0).astype(int)
-        if '중량' in df.columns:
-            df['중량'] = df['중량'].apply(normalize_weight_text)
         return df
     return pd.DataFrame()
+
+
+def parse_season_months(season_str):
+    nums = [int(m) for m in re.findall(r'\d+', str(season_str))]
+    if len(nums) >= 2 and '~' in str(season_str):
+        start, end = nums[0], nums[1]
+        if start <= end:
+            return list(range(start, end + 1))
+        return list(range(start, 13)) + list(range(1, end + 1))
+    return nums
 
 @st.cache_data(ttl=3600)
 def load_trend_data_api(keyword):
@@ -382,8 +363,12 @@ def render_analysis_page(df):
         value=f"{pd.Timestamp.now().month}월"
     )
 
-    month_val = selected_month.replace("월", "")
-    seasonal_df = df[df['제철(월)'].str.contains(month_val, na=False)] if '제철(월)' in df.columns else pd.DataFrame()
+    month_val = int(selected_month.replace("월", ""))
+    seasonal_df = (
+        df[df['제철(월)'].apply(lambda value: month_val in parse_season_months(value))]
+        if '제철(월)' in df.columns
+        else pd.DataFrame()
+    )
     keywords = sorted(seasonal_df['메인키워드'].unique()) if not seasonal_df.empty else []
     if "기타/상시" in keywords: keywords.remove("기타/상시")
 
@@ -461,18 +446,13 @@ def render_analysis_page(df):
 
         if not base_df.empty:
             if selected_suppliers: base_df = base_df[base_df['공급사'].isin(selected_suppliers)]
-            if '중량' in base_df.columns:
-                base_df['중량'] = base_df['중량'].apply(normalize_weight_text)
             
             # 등급/크기/중량 등 정밀 필터링 (원본 완벽 복원)
             grades = sorted([x for x in base_df['등급'].unique() if str(x) != 'nan'])
             sel_grades = st.sidebar.multiselect("⭐ 등급 선택", grades, default=grades)
             sizes = sorted([x for x in base_df['크기'].unique() if str(x) != 'nan'])
             sel_sizes = st.sidebar.multiselect("📏 크기 선택", sizes, default=sizes)
-            weights = sorted(
-                [x for x in base_df['중량'].unique() if str(x) != 'nan'],
-                key=weight_sort_key
-            )
+            weights = sorted([x for x in base_df['중량'].unique() if str(x) != 'nan'])
             sel_weights = st.sidebar.multiselect("⚖️ 중량 선택", weights, default=weights)
 
             st.sidebar.divider()
@@ -518,7 +498,7 @@ def render_calendar_page(df):
     st.title("🗓️ 연간 농수산물 제철 로드맵")
     st.write("사장님의 제철 사전에 등록된 상품들의 연간 흐름을 한눈에 확인하세요.")
 
-    if df.empty or '제철(월)' not in df.columns:
+    if df.empty or '메인키워드' not in df.columns or '제철(월)' not in df.columns:
         st.warning("제철 사전 데이터가 부족합니다.")
         return
 
@@ -528,14 +508,7 @@ def render_calendar_page(df):
     for _, row in unique_items.iterrows():
         kw = row['메인키워드']
         season_str = str(row['제철(월)'])
-        months = []
-        if '~' in season_str:
-            nums = re.findall(r'\d+', season_str)
-            if len(nums) >= 2:
-                start, end = int(nums[0]), int(nums[1])
-                months = list(range(start, end + 1))
-        else:
-            months = [int(m) for m in re.findall(r'\d+', season_str)]
+        months = parse_season_months(season_str)
         
         for m in months:
             calendar_data.append({"상품명": kw, "월": f"{m}월", "status": 1})

@@ -1,5 +1,0 @@
-    {
-        "name": "우람씨푸드", 
-        "url": "https://shop.baljuora.com/leejaehyeok24/signin", # 로그인하는 첫 화면 주소
-        "list_url": "https://shop.baljuora.com/leejaehyeok24/products" # 사장님이 찾으신 다이렉트 주소!
-    }

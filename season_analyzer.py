@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import pandas as pd
 
@@ -57,24 +58,35 @@ def add_seasonality_columns(df, product_column="상품명"):
     return result
 
 
-def apply_seasonality(file_path="전체품목_통합데이터_20260421.xlsx"):
-    print("🔍 상품명 키워드 분석 및 제철 매핑을 시작합니다...")
+BASE_DIR = Path(__file__).resolve().parent
+OUTPUT_DIR = Path(os.getenv("B2B_OUTPUT_DIR", str(BASE_DIR / "output")))
 
-    if not os.path.exists(file_path):
-        print("❌ 통합_단가표.xlsx 파일이 없습니다. 먼저 데이터 통합을 진행해주세요.")
+
+def find_latest_integrated_file():
+    files = list(OUTPUT_DIR.glob("전체품목_통합데이터_*.xlsx"))
+    if not files:
+        return None
+    return max(files, key=lambda path: path.stat().st_mtime)
+
+
+def apply_seasonality(file_path=None, output_path=None):
+    print("[season] 상품명 키워드 분석 및 제철 매핑을 시작합니다...")
+
+    source_path = Path(file_path) if file_path else find_latest_integrated_file()
+    if source_path is None or not source_path.exists():
+        print("[season] 통합 데이터 파일이 없습니다. 먼저 b2b_excel.py로 데이터 통합을 진행해주세요.")
         return
 
     # 모든 데이터를 문자로 안전하게 로드
-    df = pd.read_excel(file_path, dtype=str)
+    df = pd.read_excel(source_path, dtype=str)
 
     # 18,000개 데이터에 '메인키워드'와 '제철분류' 컬럼 자동 생성
-    print("💡 18,000개 상품에 제철 태그를 붙이는 중...")
+    print("[season] 상품에 제철 태그를 붙이는 중...")
     df = add_seasonality_columns(df)
 
-    # 새로운 파일로 저장
-    output_name = "통합_단가표_제철분석.xlsx"
-    df.to_excel(output_name, index=False)
-    print(f"\n✅ 분석 완료! [{output_name}] 파일에 키워드와 제철 데이터가 추가되었습니다.")
+    target_path = Path(output_path) if output_path else source_path
+    df.to_excel(target_path, index=False)
+    print(f"\n[season] 분석 완료: {target_path} 파일에 키워드와 제철 데이터가 추가되었습니다.")
 
 
 if __name__ == "__main__":
