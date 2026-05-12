@@ -8,6 +8,7 @@
 - NAS 배포 진입점: `/volume1/docker/b2b_excel/nas_update.sh`
 - NAS 앱 경로: `/volume1/docker/b2b_excel`
 - 외부 웹 주소: `https://icj7297.synology.me/`
+- SSH 배포 포트: `2022`
 
 ## GitHub Secrets
 
