@@ -10,6 +10,7 @@
 - 외부 웹 주소: `https://icj7297.synology.me/`
 - SSH 배포 포트: `2022`
 - 자동 배포 트리거: `main` 브랜치 push
+- 배포 명령: `cd /volume1/docker/b2b_excel && sh nas_update.sh`
 
 ## GitHub Secrets
 
