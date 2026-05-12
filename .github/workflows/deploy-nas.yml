@@ -47,9 +47,25 @@ jobs:
           printf '%s\n' "$NAS_KNOWN_HOSTS" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/nas_deploy_key
           chmod 644 ~/.ssh/known_hosts
+          ssh-keygen -y -f ~/.ssh/nas_deploy_key >/dev/null
         env:
           NAS_SSH_PRIVATE_KEY: ${{ secrets.NAS_SSH_PRIVATE_KEY }}
           NAS_KNOWN_HOSTS: ${{ secrets.NAS_KNOWN_HOSTS }}
+
+      - name: Verify NAS SSH
+        shell: bash
+        run: |
+          set -euo pipefail
+          ssh \
+            -i ~/.ssh/nas_deploy_key \
+            -p "$NAS_PORT" \
+            -o BatchMode=yes \
+            "$NAS_USER@$NAS_HOST" \
+            'echo github-actions-ssh-ok'
+        env:
+          NAS_HOST: ${{ secrets.NAS_HOST }}
+          NAS_PORT: ${{ secrets.NAS_PORT }}
+          NAS_USER: ${{ secrets.NAS_USER }}
 
       - name: Deploy on NAS
         shell: bash
@@ -58,6 +74,7 @@ jobs:
           ssh \
             -i ~/.ssh/nas_deploy_key \
             -p "$NAS_PORT" \
+            -o BatchMode=yes \
             "$NAS_USER@$NAS_HOST" \
             'set -eu
              cd /volume1/docker/b2b_excel
