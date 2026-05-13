@@ -31,6 +31,29 @@ def normalize_supplier_name(name):
     return str(name).split("_")[0].strip()
 
 
+def normalize_weight_value(value):
+    if pd.isna(value):
+        return value
+    text = str(value).strip()
+    return re.sub(r'(kg|g)$', lambda match: match.group(1).lower(), text, flags=re.IGNORECASE)
+
+
+def normalize_grade_from_product_name(row):
+    product_name = str(row.get('상품명', ''))
+    if any(k in product_name for k in ["쥬스용", "주스용"]):
+        return "쥬스용"
+    if "실속" in product_name:
+        return "가정용"
+    return row.get('등급')
+
+
+def normalize_size_from_product_name(row):
+    product_name = str(row.get('상품명', ''))
+    if any(k in product_name for k in ["혼합", "랜덤"]):
+        return "혼합과"
+    return row.get('크기')
+
+
 def normalize_company_link(url):
     match = GOOGLE_EXPORT_RE.match(str(url))
     if match:
@@ -104,6 +127,10 @@ def load_data():
     file_path = find_data_file()
     if file_path:
         df = pd.read_excel(file_path, dtype=str)
+        if {'등급', '상품명'}.issubset(df.columns):
+            df['등급'] = df.apply(normalize_grade_from_product_name, axis=1)
+        if {'크기', '상품명'}.issubset(df.columns):
+            df['크기'] = df.apply(normalize_size_from_product_name, axis=1)
         if '공급가' in df.columns:
             df['공급가'] = pd.to_numeric(df['공급가'], errors='coerce').fillna(0).astype(int)
         return df
@@ -421,6 +448,7 @@ def render_analysis_page(df):
 
         if not base_df.empty:
             if selected_suppliers: base_df = base_df[base_df['공급사'].isin(selected_suppliers)]
+            base_df['중량'] = base_df['중량'].apply(normalize_weight_value)
             
             # 등급/크기/중량 등 정밀 필터링 (원본 완벽 복원)
             grades = sorted([x for x in base_df['등급'].unique() if str(x) != 'nan'])

@@ -61,6 +61,11 @@ DIRECT_DOWNLOAD_CONCURRENCY = 2
 MAX_DOWNLOAD_RETRIES = 2
 RETRY_DELAY_SECONDS = 3
 
+
+def normalize_weight_value(value):
+    text = str(value).strip()
+    return re.sub(r'(kg|g)$', lambda match: match.group(1).lower(), text, flags=re.IGNORECASE)
+
 # --- 1. 유틸리티 함수 (팝업 닫기, 파싱) ---
 
 async def close_all_popups(page):
@@ -81,7 +86,11 @@ def parse_product_info(row):
     
     # 1. 등급 추출 (사장님 추가 요청사항 반영)
     grade = "일반"
-    if "가정용" in full_name: 
+    if any(k in full_name for k in ["쥬스용", "주스용"]):
+        grade = "쥬스용"
+    elif "실속" in full_name:
+        grade = "가정용"
+    elif "가정용" in full_name: 
         grade = "가정용"
     # '선물', '세트', '보자기' 중 하나라도 들어가면 '선물세트'로 분류
     elif any(k in full_name for k in ["선물", "세트", "보자기"]): 
@@ -91,10 +100,13 @@ def parse_product_info(row):
     
     # 2. 크기 추출
     size = "미표기"
-    for k in ["혼합과", "소과", "중소과", "중과", "중대과", "대과"]:
-        if k in full_name: 
-            size = k
-            break
+    if any(k in full_name for k in ["혼합", "랜덤"]):
+        size = "혼합과"
+    else:
+        for k in ["혼합과", "소과", "중소과", "중과", "중대과", "대과"]:
+            if k in full_name: 
+                size = k
+                break
             
     # 3. 과수 추출 (개, 입, 알, 과, 구)
     count = "미표기"
@@ -104,7 +116,7 @@ def parse_product_info(row):
     
     # 4. 중량 추출 (kg, g)
     weight_match = re.search(r'(\d+\.?\d*)(kg|g)', full_name, re.IGNORECASE)
-    weight = weight_match.group(0) if weight_match else "미표기"
+    weight = normalize_weight_value(weight_match.group(0)) if weight_match else "미표기"
     
     return pd.Series([grade, size, weight, count, full_name])
 
