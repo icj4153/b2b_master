@@ -7,6 +7,11 @@ from datetime import datetime
 DOWNLOAD_DIR = "b2b_downloads"
 OUTPUT_FILE = f"integrated_products_{datetime.now().strftime('%Y%m%d')}.xlsx"
 
+
+def normalize_weight_value(value):
+    text = str(value).strip()
+    return re.sub(r'(kg|g)$', lambda match: match.group(1).lower(), text, flags=re.IGNORECASE)
+
 def parse_product_info(row):
     """
     상품명에서 등급, 크기, 중량, 과수를 추출하고 단위를 통일함
@@ -15,17 +20,22 @@ def parse_product_info(row):
     
     # 1. 등급 추출
     grade = "일반"
-    if "가정용" in name: grade = "가정용"
+    if any(k in name for k in ["쥬스용", "주스용"]): grade = "쥬스용"
+    elif "실속" in name: grade = "가정용"
+    elif "가정용" in name: grade = "가정용"
     elif any(k in name for k in ["선물세트", "선물"]): grade = "선물세트"
     elif "정품" in name: grade = "정품"
     
     # 2. 크기 추출
     size = "미표기"
-    size_keywords = ["혼합과", "소과", "중소과", "중과", "중대과", "대과"]
-    for k in size_keywords:
-        if k in name:
-            size = k
-            break
+    if any(k in name for k in ["혼합", "랜덤"]):
+        size = "혼합과"
+    else:
+        size_keywords = ["혼합과", "소과", "중소과", "중과", "중대과", "대과"]
+        for k in size_keywords:
+            if k in name:
+                size = k
+                break
             
     # 3. 과수 추출 및 단위 통일 (5개, 5입, 5알 -> 5과)
     # 패턴: 숫자 + (개|입|알|과) 혹은 숫자~숫자 + (개|입|알|과)
@@ -40,7 +50,7 @@ def parse_product_info(row):
     
     # 4. 중량 추출 (숫자 + kg/g)
     weight_match = re.search(r'(\d+\.?\d*)(kg|g)', name, re.IGNORECASE)
-    weight = weight_match.group(0) if weight_match else "미표기"
+    weight = normalize_weight_value(weight_match.group(0)) if weight_match else "미표기"
     
     return pd.Series([grade, size, weight, count])
 
