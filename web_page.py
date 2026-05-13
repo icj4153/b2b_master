@@ -54,6 +54,87 @@ def normalize_size_from_product_name(row):
     return row.get('크기')
 
 
+SEARCH_HINT_KEYWORDS = ["세척", "사과", "부사"]
+
+
+def normalize_product_search_text(value):
+    if pd.isna(value):
+        return ""
+    text = str(value).casefold()
+    text = re.sub(r"[\s\-_./|,()[\]{}]+", " ", text)
+    text = re.sub(r"[^0-9a-z가-힣]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def compact_product_search_text(value):
+    return normalize_product_search_text(value).replace(" ", "")
+
+
+def get_product_search_hints(df=None):
+    hints = set(SEARCH_HINT_KEYWORDS)
+
+    if "CATEGORY_KEYWORDS" in globals():
+        for keyword_list in CATEGORY_KEYWORDS.values():
+            hints.update(keyword_list)
+
+    if df is not None and "메인키워드" in df.columns:
+        hints.update(df["메인키워드"].dropna().astype(str).unique())
+
+    normalized_hints = {
+        compact_product_search_text(hint)
+        for hint in hints
+        if len(compact_product_search_text(hint)) >= 2
+    }
+    return sorted(normalized_hints, key=len, reverse=True)
+
+
+def decompose_compact_search_query(compact_query, hints):
+    matched_terms = []
+    covered_indexes = set()
+
+    for hint in hints:
+        start = compact_query.find(hint)
+        if start == -1:
+            continue
+        matched_terms.append(hint)
+        covered_indexes.update(range(start, start + len(hint)))
+
+    if len(matched_terms) < 2 or len(covered_indexes) != len(compact_query):
+        return []
+    return matched_terms
+
+
+def product_name_matches_search(product_name, search_query, search_hints=None):
+    normalized_product = normalize_product_search_text(product_name)
+    compact_product = normalized_product.replace(" ", "")
+    normalized_query = normalize_product_search_text(search_query)
+    compact_query = normalized_query.replace(" ", "")
+
+    if not compact_query:
+        return False
+
+    if compact_query in compact_product:
+        return True
+
+    query_terms = normalized_query.split()
+    if len(query_terms) > 1:
+        return all(term in compact_product for term in query_terms)
+
+    decomposed_terms = decompose_compact_search_query(compact_query, search_hints or [])
+    return bool(decomposed_terms) and all(term in compact_product for term in decomposed_terms)
+
+
+def filter_products_by_name_search(df, search_query):
+    if df.empty or "상품명" not in df.columns:
+        return df.iloc[0:0].copy()
+
+    search_hints = get_product_search_hints(df)
+    mask = df["상품명"].apply(
+        lambda product_name: product_name_matches_search(product_name, search_query, search_hints)
+    )
+    return df[mask].copy()
+
+
 def normalize_company_link(url):
     match = GOOGLE_EXPORT_RE.match(str(url))
     if match:
@@ -416,7 +497,7 @@ def render_analysis_page(df):
 
     if target_keyword:
         if search_query:
-            base_df = df[df['상품명'].str.contains(search_query, na=False)].copy()
+            base_df = filter_products_by_name_search(df, search_query)
             view_title = f"'{search_query}' 검색 결과"
         else:
             base_df = df[df['메인키워드'] == st.session_state.clicked_kw].copy()
