@@ -4,11 +4,17 @@ import os
 import urllib.request
 import json
 import ast
+import ssl
+import certifi
+import time
+import socket
+import urllib.error
 from datetime import datetime, timedelta
 from pathlib import Path
 import altair as alt
 import re
 from env_utils import get_env
+from season_analyzer import SEASON_MAP
 
 # [필독] 무조건 1번 줄에 위치
 st.set_page_config(page_title="제철한가득 소싱 마스터", layout="wide")
@@ -20,6 +26,9 @@ NAVER_CLIENT_ID = get_env("NAVER_CLIENT_ID", "")
 NAVER_CLIENT_SECRET = get_env("NAVER_CLIENT_SECRET", "")
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = Path(os.getenv("B2B_OUTPUT_DIR", str(BASE_DIR / "output")))
+LOG_DIR = Path(os.getenv("B2B_LOG_DIR", str(BASE_DIR / "logs")))
+TREND_API_LAST_EVENTS = {}
+TREND_API_CACHE_TTL_SECONDS = 3600
 # ---------------------------------------------------------
 
 GOOGLE_EXPORT_RE = re.compile(
@@ -227,10 +236,47 @@ def parse_season_months(season_str):
         return list(range(start, 13)) + list(range(1, end + 1))
     return nums
 
-@st.cache_data(ttl=3600)
-def load_trend_data_api(keyword):
+
+def record_trend_api_event(keyword, status, elapsed, **details):
+    event = {
+        "logged_at": datetime.now().isoformat(timespec="seconds"),
+        "logged_at_ts": time.time(),
+        "keyword": keyword,
+        "status": status,
+        "elapsed": round(elapsed, 2),
+        **details,
+    }
+    TREND_API_LAST_EVENTS[keyword] = event
+
+    message_parts = [
+        f"[trend] {status}",
+        f"keyword={keyword!r}",
+        f"elapsed={elapsed:.2f}s",
+    ]
+    for key, value in details.items():
+        message_parts.append(f"{key}={value!r}")
+    message = " ".join(message_parts)
+    print(message)
+
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        log_path = LOG_DIR / f"trend_api_{datetime.now().strftime('%Y%m%d')}.log"
+        with log_path.open("a", encoding="utf-8") as log_file:
+            log_file.write(json.dumps(event, ensure_ascii=False) + "\n")
+    except Exception as exc:
+        print(f"[trend-log] write-failed error={type(exc).__name__}: {exc}")
+
+    return event
+
+def get_trend_api_success_cache():
+    return st.session_state.setdefault("trend_api_success_cache", {})
+
+
+def fetch_trend_data_api(keyword, attempt=1):
     if not NAVER_CLIENT_ID or not NAVER_CLIENT_SECRET:
+        record_trend_api_event(keyword, "skip", 0, reason="missing NAVER API credentials")
         return None
+    start_time = time.time()
     try:
         url = "https://openapi.naver.com/v1/datalab/search"
         end_date = datetime.now()
@@ -245,18 +291,67 @@ def load_trend_data_api(keyword):
         request.add_header("X-Naver-Client-Id", NAVER_CLIENT_ID)
         request.add_header("X-Naver-Client-Secret", NAVER_CLIENT_SECRET)
         request.add_header("Content-Type", "application/json")
-        response = urllib.request.urlopen(request, data=json.dumps(body).encode("utf-8"))
+        ssl_context = ssl.create_default_context(cafile=certifi.where())
+        response = urllib.request.urlopen(
+            request,
+            data=json.dumps(body).encode("utf-8"),
+            context=ssl_context,
+            timeout=5,
+        )
+        elapsed = time.time() - start_time
         if response.getcode() == 200:
             data = json.loads(response.read())
-            if not data['results'][0]['data']: return None
+            rows = len(data['results'][0]['data'])
+            if not rows:
+                record_trend_api_event(keyword, "no-data", elapsed, attempt=attempt, rows=0)
+                return None
             trend_df = pd.DataFrame(data['results'][0]['data'])
             trend_df['날짜'] = pd.to_datetime(trend_df['period'])
             trend_df.set_index('날짜', inplace=True)
             trend_df.rename(columns={'ratio': keyword}, inplace=True)
             trend_df.drop(columns=['period'], inplace=True)
+            record_trend_api_event(keyword, "success", elapsed, attempt=attempt, rows=rows)
             return trend_df
+        record_trend_api_event(keyword, "http-status", elapsed, attempt=attempt, http_status=response.getcode())
         return None
-    except Exception: return None
+    except socket.timeout:
+        record_trend_api_event(keyword, "timeout", time.time() - start_time, attempt=attempt)
+        return None
+    except urllib.error.HTTPError as exc:
+        details = exc.read().decode("utf-8", errors="replace")[:300]
+        record_trend_api_event(keyword, "http-error", time.time() - start_time, attempt=attempt, http_status=exc.code, body=details)
+        return None
+    except urllib.error.URLError as exc:
+        record_trend_api_event(keyword, "url-error", time.time() - start_time, attempt=attempt, reason=str(exc.reason))
+        return None
+    except Exception as exc:
+        record_trend_api_event(keyword, "error", time.time() - start_time, attempt=attempt, error=f"{type(exc).__name__}: {exc}")
+        return None
+
+
+def load_trend_data_api(keyword):
+    cache = get_trend_api_success_cache()
+    cached = cache.get(keyword)
+    now = time.time()
+    if cached and now - cached["cached_at"] < TREND_API_CACHE_TTL_SECONDS:
+        trend_df = cached["data"].copy()
+        record_trend_api_event(keyword, "cache-hit", 0, rows=len(trend_df))
+        return trend_df
+    if cached:
+        cache.pop(keyword, None)
+
+    transient_statuses = {"timeout", "url-error", "error"}
+    for attempt in range(1, 3):
+        trend_df = fetch_trend_data_api(keyword, attempt=attempt)
+        event = TREND_API_LAST_EVENTS.get(keyword, {})
+        if trend_df is not None:
+            cache[keyword] = {"cached_at": now, "data": trend_df.copy()}
+            return trend_df
+        if event.get("status") not in transient_statuses:
+            return None
+        time.sleep(0.2)
+    return None
+
 
 # 사장님 비급 알고리즘
 def analyze_graph_pattern(trend_df, keyword):
@@ -301,43 +396,63 @@ def analyze_graph_pattern(trend_df, keyword):
     return pattern, status
 
 
-CATEGORY_ORDER = ["과일", "수산물", "야채", "축산", "김치/기타"]
+CATEGORY_ORDER = ["국내과일", "수입과일", "수산물", "야채", "축산", "김치/기타"]
 CATEGORY_STYLES = {
-    "과일": {"bg": "#F7C9C6", "border": "#E88A84", "text": "#7C2520"},
+    "국내과일": {"bg": "#F7C9C6", "border": "#E88A84", "text": "#7C2520"},
+    "수입과일": {"bg": "#F9D8A8", "border": "#E4A449", "text": "#724A12"},
     "수산물": {"bg": "#C8DDF4", "border": "#7FA8D8", "text": "#1E4F82"},
     "야채": {"bg": "#CFE6C8", "border": "#8FBE80", "text": "#2E6532"},
     "축산": {"bg": "#F3CFDA", "border": "#D98BA6", "text": "#7A2943"},
     "김치/기타": {"bg": "#F1D8BC", "border": "#D9A870", "text": "#6E421B"},
 }
 CATEGORY_SLUGS = {
-    "과일": "fruit",
+    "국내과일": "domestic-fruit",
+    "수입과일": "imported-fruit",
     "수산물": "seafood",
     "야채": "vegetable",
     "축산": "meat",
     "김치/기타": "etc",
 }
+
+
+def build_category_keywords_from_season_map():
+    grouped = {
+        "국내과일": [],
+        "수입과일": [],
+        "수산물": [],
+        "야채": [],
+    }
+    current_category = None
+    key_pattern = re.compile(r"^\s*['\"]([^'\"]+)['\"]\s*:")
+
+    for line in (BASE_DIR / "season_analyzer.py").read_text(encoding="utf-8").splitlines():
+        stripped = line.strip()
+        if stripped.startswith("#"):
+            category_name = stripped.removeprefix("#").strip()
+            if category_name in grouped:
+                current_category = category_name
+            continue
+
+        match = key_pattern.match(line)
+        if current_category and match:
+            keyword = match.group(1)
+            if keyword in SEASON_MAP:
+                grouped[current_category].append(keyword)
+
+    return grouped
+
+
+SEASON_CATEGORY_KEYWORDS = build_category_keywords_from_season_map()
 CATEGORY_KEYWORDS = {
-    "과일": [
-        "참다래", "수박", "참외", "성주 참외", "복숭아", "신비복숭아", "자두", "블루베리",
-        "복분자", "포도", "거봉", "체리", "메론", "멜론", "샤인머스캣", "홍로", "부사",
-        "사과", "배", "단감", "홍시", "곶감", "레드키위", "골드키위", "무화과", "감귤",
-        "귤", "한라봉", "천혜향", "레드향", "황금향", "설향", "딸기", "타이벡",
-    ],
-    "수산물": [
-        "주꾸미", "바지락", "멍게", "장어", "전복", "오징어", "대하", "새우", "전어",
-        "꽃게", "굴", "과메기", "방어", "꼬막", "가리비", "석화",
-    ],
-    "야채": [
-        "눈개승마", "두릅", "미나리", "대저토마토", "짭짤이토마토", "봄동", "달래",
-        "냉이", "초당옥수수", "찰옥수수", "햇감자", "감자", "고구마", "호박고구마",
-        "밤고구마", "꿀고구마", "생강", "표고버섯", "송이버섯", "늙은호박", "콜라비",
-        "시금치", "우엉",
-    ],
+    "국내과일": SEASON_CATEGORY_KEYWORDS["국내과일"],
+    "수입과일": SEASON_CATEGORY_KEYWORDS["수입과일"],
+    "수산물": SEASON_CATEGORY_KEYWORDS["수산물"],
+    "야채": SEASON_CATEGORY_KEYWORDS["야채"],
     "축산": [
         "한우", "소고기", "돼지고기", "닭고기", "오리고기", "계란", "달걀", "갈비",
         "삼겹살", "목살", "사골", "우족", "양념육",
     ],
-    "김치/기타": ["동치미", "김치", "밤", "땅콩", "기타/상시"],
+    "김치/기타": ["김치", "기타/상시"],
 }
 KEYWORD_CATEGORY_MAP = {
     keyword: category
