@@ -191,7 +191,6 @@ def load_supplier_links():
 
 
 # 1. 데이터 로드 함수
-@st.cache_data
 def find_data_file():
     if OUTPUT_DIR.exists():
         output_files = list(OUTPUT_DIR.glob("전체품목_통합데이터_*.xlsx"))
@@ -213,8 +212,8 @@ def find_data_file():
 
 
 @st.cache_data
-def load_data():
-    file_path = find_data_file()
+def load_data(file_path_text, file_mtime_ns, file_size):
+    file_path = Path(file_path_text) if file_path_text else None
     if file_path:
         df = pd.read_excel(file_path, dtype=str)
         if {'등급', '상품명'}.issubset(df.columns):
@@ -225,6 +224,15 @@ def load_data():
             df['공급가'] = pd.to_numeric(df['공급가'], errors='coerce').fillna(0).astype(int)
         return df
     return pd.DataFrame()
+
+
+def load_latest_data():
+    file_path = find_data_file()
+    if not file_path:
+        return pd.DataFrame()
+
+    file_stat = file_path.stat()
+    return load_data(str(file_path), file_stat.st_mtime_ns, file_stat.st_size)
 
 
 def parse_season_months(season_str):
@@ -728,7 +736,7 @@ def render_calendar_page(df):
 # ---------------------------------------------------------
 # 🚩 메인 실행부
 # ---------------------------------------------------------
-df_main = load_data()
+df_main = load_latest_data()
 with st.sidebar:
     st.title("👨‍🌾 제철한가득 지휘소")
     menu = st.radio("🚩 메뉴 선택", ["실전 소싱 분석", "연간 제철 로드맵"])
