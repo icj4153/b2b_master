@@ -53,6 +53,7 @@ OUTPUT_DIR = Path(os.getenv("B2B_OUTPUT_DIR", str(BASE_DIR / "output")))
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 TARGET_BTN_TEXT = "전체제품 엑셀 다운로드"
 OUTPUT_FILE = str(OUTPUT_DIR / f"전체품목_통합데이터_{datetime.now().strftime('%Y%m%d')}.xlsx")
+PRICE_HISTORY_CACHE_FILE = OUTPUT_DIR / "price_history.csv"
 BROWSER_DOWNLOAD_CONCURRENCY = 3
 GOOGLE_SHEET_CONCURRENCY = 8
 BALJUORA_DOWNLOAD_CONCURRENCY = 2
@@ -308,6 +309,42 @@ async def download_direct(context, company):
 
 import gc  # 🗑️ 메모리 강제 청소를 위해 상단 추가
 
+
+def update_price_history_cache(integrated_df):
+    required_columns = {"상품명", "공급사", "공급가"}
+    if not required_columns.issubset(integrated_df.columns):
+        print("[price-history] 가격 이력 캐시에 필요한 컬럼이 없어 건너뜁니다.")
+        return
+
+    today_text = datetime.now().strftime("%Y-%m-%d")
+    today_history = integrated_df[["상품명", "공급사", "공급가"]].copy()
+    today_history = today_history.dropna(subset=["상품명", "공급가"])
+    today_history["날짜"] = today_text
+    today_history["상품명"] = today_history["상품명"].astype(str)
+    today_history["공급사"] = today_history["공급사"].fillna("공급사 미표기").astype(str)
+    today_history["공급가"] = pd.to_numeric(today_history["공급가"], errors="coerce")
+    today_history = today_history.dropna(subset=["공급가"])
+    today_history = today_history[["날짜", "상품명", "공급사", "공급가"]]
+
+    if PRICE_HISTORY_CACHE_FILE.exists():
+        try:
+            previous_history = pd.read_csv(PRICE_HISTORY_CACHE_FILE, dtype={"상품명": str, "공급사": str})
+        except Exception as exc:
+            print(f"[price-history] 기존 캐시 읽기 실패, 새로 생성합니다: {type(exc).__name__}: {exc}")
+            previous_history = pd.DataFrame(columns=["날짜", "상품명", "공급사", "공급가"])
+    else:
+        previous_history = pd.DataFrame(columns=["날짜", "상품명", "공급사", "공급가"])
+
+    price_history = pd.concat([previous_history, today_history], ignore_index=True)
+    price_history = price_history.dropna(subset=["날짜", "상품명", "공급가"])
+    price_history["공급가"] = pd.to_numeric(price_history["공급가"], errors="coerce")
+    price_history = price_history.dropna(subset=["공급가"])
+    price_history = price_history.drop_duplicates(subset=["날짜", "상품명", "공급사", "공급가"])
+    price_history = price_history.sort_values(["날짜", "상품명", "공급가", "공급사"])
+    price_history.to_csv(PRICE_HISTORY_CACHE_FILE, index=False, encoding="utf-8-sig")
+    print(f"[price-history] 가격 이력 캐시 갱신 완료: {PRICE_HISTORY_CACHE_FILE} ({len(price_history):,} rows)")
+
+
 def integrate_data():
     all_rows = []
     if not os.path.exists(DOWNLOAD_DIR): 
@@ -433,6 +470,7 @@ def integrate_data():
         
         cols = ['등급','크기','중량','과수','공급가','공급사','상품명','메인키워드','제철(월)']
         combined[[c for c in cols if c in combined.columns]].to_excel(OUTPUT_FILE, index=False)
+        update_price_history_cache(combined)
         print(f"\n★ 데이터 통합 완료! 파일명: {OUTPUT_FILE}")
 
         # ★ 핵심 해결책 2: 파이썬이 잡고 있는 메모리를 강제로 청소해서 잠금을 완벽히 해제

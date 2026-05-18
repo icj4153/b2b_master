@@ -27,6 +27,7 @@ NAVER_CLIENT_SECRET = get_env("NAVER_CLIENT_SECRET", "")
 BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = Path(os.getenv("B2B_OUTPUT_DIR", str(BASE_DIR / "output")))
 LOG_DIR = Path(os.getenv("B2B_LOG_DIR", str(BASE_DIR / "logs")))
+PRICE_HISTORY_CACHE_FILE = OUTPUT_DIR / "price_history.csv"
 TREND_API_LAST_EVENTS = {}
 TREND_API_CACHE_TTL_SECONDS = 3600
 # ---------------------------------------------------------
@@ -257,14 +258,43 @@ def get_data_file_infos():
     return tuple(file_infos)
 
 
+def get_price_history_cache_info():
+    if not PRICE_HISTORY_CACHE_FILE.exists():
+        return None
+
+    file_stat = PRICE_HISTORY_CACHE_FILE.stat()
+    return (str(PRICE_HISTORY_CACHE_FILE), file_stat.st_mtime_ns, file_stat.st_size)
+
+
 @st.cache_data
-def load_product_price_history(file_infos, product_name):
+def load_price_history_cache(cache_info):
+    cache_path_text, _file_mtime_ns, _file_size = cache_info
+    history_df = pd.read_csv(cache_path_text, dtype={"상품명": str, "공급사": str})
+    required_columns = {"날짜", "상품명", "공급사", "공급가"}
+    if not required_columns.issubset(history_df.columns):
+        return pd.DataFrame(columns=["날짜", "상품명", "공급사", "공급가"])
+
+    history_df = history_df[["날짜", "상품명", "공급사", "공급가"]].copy()
+    history_df["날짜"] = pd.to_datetime(history_df["날짜"], errors="coerce")
+    history_df["공급가"] = pd.to_numeric(history_df["공급가"], errors="coerce")
+    history_df = history_df.dropna(subset=["날짜", "상품명", "공급가"])
+    history_df["공급사"] = history_df["공급사"].fillna("공급사 미표기").astype(str)
+    return history_df.sort_values(["날짜", "공급가", "공급사"])
+
+
+@st.cache_data
+def load_price_history_index(file_infos):
     history_frames = []
+    price_columns = ["상품명", "공급사", "공급가"]
     required_columns = {"상품명", "공급가"}
 
     for file_path_text, file_date_text, _file_mtime_ns, _file_size in file_infos:
         try:
-            daily_df = pd.read_excel(file_path_text, dtype=str)
+            daily_df = pd.read_excel(
+                file_path_text,
+                dtype=str,
+                usecols=lambda column: column in price_columns,
+            )
         except Exception as exc:
             print(f"[price-history] read-failed path={file_path_text!r} error={type(exc).__name__}: {exc}")
             continue
@@ -272,20 +302,19 @@ def load_product_price_history(file_infos, product_name):
         if not required_columns.issubset(daily_df.columns):
             continue
 
-        product_rows = daily_df[daily_df["상품명"].astype(str) == str(product_name)].copy()
-        if product_rows.empty:
+        daily_df = daily_df.dropna(subset=["상품명"]).copy()
+        daily_df["날짜"] = pd.to_datetime(file_date_text)
+        daily_df["상품명"] = daily_df["상품명"].astype(str)
+        daily_df["공급가"] = pd.to_numeric(daily_df["공급가"], errors="coerce")
+        daily_df = daily_df.dropna(subset=["공급가"])
+        if daily_df.empty:
             continue
 
-        product_rows["날짜"] = pd.to_datetime(file_date_text)
-        product_rows["공급가"] = pd.to_numeric(product_rows["공급가"], errors="coerce")
-        product_rows = product_rows.dropna(subset=["공급가"])
-        if product_rows.empty:
-            continue
+        if "공급사" not in daily_df.columns:
+            daily_df["공급사"] = "공급사 미표기"
+        daily_df["공급사"] = daily_df["공급사"].fillna("공급사 미표기").astype(str)
 
-        if "공급사" not in product_rows.columns:
-            product_rows["공급사"] = "공급사 미표기"
-
-        history_frames.append(product_rows[["날짜", "상품명", "공급사", "공급가"]])
+        history_frames.append(daily_df[["날짜", "상품명", "공급사", "공급가"]])
 
     if not history_frames:
         return pd.DataFrame(columns=["날짜", "상품명", "공급사", "공급가"])
@@ -299,7 +328,13 @@ def render_product_price_history(product_name):
         st.info("가격 추적에 사용할 일별 통합 데이터 파일이 없습니다.")
         return
 
-    history_df = load_product_price_history(file_infos, product_name)
+    with st.spinner("가격 이력을 준비하는 중입니다..."):
+        cache_info = get_price_history_cache_info()
+        if cache_info:
+            price_history_index = load_price_history_cache(cache_info)
+        else:
+            price_history_index = load_price_history_index(file_infos)
+    history_df = price_history_index[price_history_index["상품명"] == str(product_name)].copy()
     if history_df.empty:
         st.info("선택한 상품의 과거 가격 데이터가 아직 없습니다.")
         return
