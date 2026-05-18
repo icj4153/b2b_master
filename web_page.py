@@ -34,6 +34,7 @@ TREND_API_CACHE_TTL_SECONDS = 3600
 GOOGLE_EXPORT_RE = re.compile(
     r"https://docs\.google\.com/spreadsheets/d/([^/]+)/export\?gid=([^#&]+)"
 )
+INTEGRATED_FILE_RE = re.compile(r"전체품목_통합데이터_(\d{8})\.xlsx$")
 
 
 def normalize_supplier_name(name):
@@ -233,6 +234,152 @@ def load_latest_data():
 
     file_stat = file_path.stat()
     return load_data(str(file_path), file_stat.st_mtime_ns, file_stat.st_size)
+
+
+def parse_data_file_date(file_path):
+    match = INTEGRATED_FILE_RE.match(file_path.name)
+    if not match:
+        return None
+    return pd.to_datetime(match.group(1), format="%Y%m%d", errors="coerce")
+
+
+def get_data_file_infos():
+    if not OUTPUT_DIR.exists():
+        return tuple()
+
+    file_infos = []
+    for file_path in sorted(OUTPUT_DIR.glob("전체품목_통합데이터_*.xlsx")):
+        file_date = parse_data_file_date(file_path)
+        if pd.isna(file_date):
+            continue
+        file_stat = file_path.stat()
+        file_infos.append((str(file_path), file_date.strftime("%Y-%m-%d"), file_stat.st_mtime_ns, file_stat.st_size))
+    return tuple(file_infos)
+
+
+@st.cache_data
+def load_product_price_history(file_infos, product_name):
+    history_frames = []
+    required_columns = {"상품명", "공급가"}
+
+    for file_path_text, file_date_text, _file_mtime_ns, _file_size in file_infos:
+        try:
+            daily_df = pd.read_excel(file_path_text, dtype=str)
+        except Exception as exc:
+            print(f"[price-history] read-failed path={file_path_text!r} error={type(exc).__name__}: {exc}")
+            continue
+
+        if not required_columns.issubset(daily_df.columns):
+            continue
+
+        product_rows = daily_df[daily_df["상품명"].astype(str) == str(product_name)].copy()
+        if product_rows.empty:
+            continue
+
+        product_rows["날짜"] = pd.to_datetime(file_date_text)
+        product_rows["공급가"] = pd.to_numeric(product_rows["공급가"], errors="coerce")
+        product_rows = product_rows.dropna(subset=["공급가"])
+        if product_rows.empty:
+            continue
+
+        if "공급사" not in product_rows.columns:
+            product_rows["공급사"] = "공급사 미표기"
+
+        history_frames.append(product_rows[["날짜", "상품명", "공급사", "공급가"]])
+
+    if not history_frames:
+        return pd.DataFrame(columns=["날짜", "상품명", "공급사", "공급가"])
+
+    return pd.concat(history_frames, ignore_index=True).sort_values(["날짜", "공급가", "공급사"])
+
+
+def render_product_price_history(product_name):
+    file_infos = get_data_file_infos()
+    if not file_infos:
+        st.info("가격 추적에 사용할 일별 통합 데이터 파일이 없습니다.")
+        return
+
+    history_df = load_product_price_history(file_infos, product_name)
+    if history_df.empty:
+        st.info("선택한 상품의 과거 가격 데이터가 아직 없습니다.")
+        return
+
+    daily_summary = (
+        history_df.groupby("날짜", as_index=False)
+        .agg(
+            최저가=("공급가", "min"),
+            평균가=("공급가", "mean"),
+            최고가=("공급가", "max"),
+            등록수=("공급가", "count"),
+        )
+        .sort_values("날짜")
+    )
+    daily_summary["평균가"] = daily_summary["평균가"].round(0)
+    chart_df = daily_summary.melt(
+        id_vars=["날짜", "등록수"],
+        value_vars=["최저가", "평균가", "최고가"],
+        var_name="가격구분",
+        value_name="공급가",
+    )
+
+    st.write(f"### 가격 추적: {product_name}")
+    metric_cols = st.columns(4)
+    latest_row = daily_summary.iloc[-1]
+    first_row = daily_summary.iloc[0]
+    price_delta = int(latest_row["최저가"] - first_row["최저가"])
+    metric_cols[0].metric("최근 최저가", f"{int(latest_row['최저가']):,} 원", f"{price_delta:,} 원")
+    metric_cols[1].metric("최근 평균가", f"{int(latest_row['평균가']):,} 원")
+    metric_cols[2].metric("최근 최고가", f"{int(latest_row['최고가']):,} 원")
+    metric_cols[3].metric("추적 일수", f"{len(daily_summary):,} 일")
+
+    nearest = alt.selection_point(nearest=True, on="pointerover", fields=["날짜"], empty=False)
+    line = alt.Chart(chart_df).mark_line(strokeWidth=3).encode(
+        x=alt.X("날짜:T", title="", axis=alt.Axis(format="%m/%d", labelAngle=0)),
+        y=alt.Y("공급가:Q", title="공급가", axis=alt.Axis(format=",")),
+        color=alt.Color("가격구분:N", title="가격"),
+    )
+    selectors = alt.Chart(chart_df).mark_point().encode(
+        x="날짜:T",
+        opacity=alt.value(0),
+    ).add_params(nearest)
+    points = line.mark_point(size=80, filled=True).encode(
+        opacity=alt.condition(nearest, alt.value(1), alt.value(0)),
+        tooltip=[
+            alt.Tooltip("날짜:T", title="날짜", format="%Y-%m-%d"),
+            alt.Tooltip("가격구분:N", title="가격구분"),
+            alt.Tooltip("공급가:Q", title="공급가", format=","),
+            alt.Tooltip("등록수:Q", title="등록수"),
+        ],
+    )
+    rules = alt.Chart(chart_df).mark_rule(color="#D3D3D3", strokeDash=[4, 4]).encode(
+        x="날짜:T"
+    ).transform_filter(nearest)
+    st.altair_chart(alt.layer(line, selectors, points, rules).properties(height=300), width="stretch")
+
+    if history_df["공급사"].nunique() > 1:
+        with st.expander("공급사별 가격 추이"):
+            supplier_chart = alt.Chart(history_df).mark_line(point=True).encode(
+                x=alt.X("날짜:T", title="", axis=alt.Axis(format="%m/%d", labelAngle=0)),
+                y=alt.Y("공급가:Q", title="공급가", axis=alt.Axis(format=",")),
+                color=alt.Color("공급사:N", title="공급사"),
+                tooltip=[
+                    alt.Tooltip("날짜:T", title="날짜", format="%Y-%m-%d"),
+                    alt.Tooltip("공급사:N", title="공급사"),
+                    alt.Tooltip("공급가:Q", title="공급가", format=","),
+                ],
+            ).properties(height=260)
+            st.altair_chart(supplier_chart, width="stretch")
+
+    with st.expander("일별 가격 데이터"):
+        st.dataframe(
+            history_df.sort_values(["날짜", "공급가"], ascending=[False, True]),
+            width="stretch",
+            height=260,
+            column_config={
+                "날짜": st.column_config.DateColumn(format="YYYY-MM-DD"),
+                "공급가": st.column_config.NumberColumn(format="%d 원"),
+            },
+        )
 
 
 def parse_season_months(season_str):
@@ -688,14 +835,34 @@ def render_analysis_page(df):
             display_columns = [c for c in display_columns if c in final_df.columns]
 
             st.write(f"### 📋 {view_title} (총 {len(final_df):,}개)")
-            st.dataframe(final_df.sort_values(by='공급가')[display_columns], width='stretch', height=400,
+            sorted_final_df = final_df.sort_values(by='공급가')
+            product_options = sorted(sorted_final_df['상품명'].dropna().astype(str).unique())
+            table_df = sorted_final_df[display_columns].reset_index(drop=True)
+            selected_product_name = None
+            table_event = st.dataframe(table_df, width='stretch', height=400,
                 column_config={"공급가": st.column_config.NumberColumn(format="%d 원"),
                                "순수익": st.column_config.NumberColumn(format="%d 원"),
                                "마진율": st.column_config.NumberColumn(format="%.1f %%"),
                                "공급사 홈페이지": st.column_config.LinkColumn(
                                    "공급사 홈페이지",
                                    display_text="열기"
-                               )})
+                               )},
+                on_select="rerun",
+                selection_mode="single-row")
+            selected_rows = table_event.selection.rows
+            if selected_rows and "상품명" in table_df.columns:
+                selected_product_name = str(table_df.iloc[selected_rows[0]]["상품명"])
+            elif product_options:
+                selected_product_name = st.selectbox(
+                    "가격 그래프를 볼 상품명",
+                    product_options,
+                    index=None,
+                    key=f"price_history_product_{target_keyword}",
+                    placeholder="상품명을 선택하세요",
+                )
+            if selected_product_name:
+                st.divider()
+                render_product_price_history(selected_product_name)
     else: st.info("👆 상단에서 상품을 선택하거나 검색해 주세요.")
 
 # ---------------------------------------------------------
