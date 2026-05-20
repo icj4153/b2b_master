@@ -17,5 +17,6 @@ ADMIN_PLUS_COMPANIES = [
     {"name": "늘푸른우리", "url": "https://hwanggs3.adminplus.co.kr/partner/login.html"},
     {"name": "제철도매", "url": "https://pjh4732.adminplus.co.kr/partner/login.html"},
     {"name": "과일방앗간", "url": "https://cks0644.adminplus.co.kr/partner/login.html"},
-    {"name": "초록청년", "url": "https://chfhrcjdsus.adminplus.co.kr/partner/login.html"}
+    {"name": "초록청년", "url": "https://chfhrcjdsus.adminplus.co.kr/partner/login.html"},
+    {"name": "농민연합", "url": "https://farmcity.adminplus.co.kr/partner/login.html?rtnurl=%2Fpartner%2F"}
 ]
