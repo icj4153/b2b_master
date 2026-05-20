@@ -335,6 +335,9 @@ def update_price_history_cache(integrated_df):
     else:
         previous_history = pd.DataFrame(columns=["날짜", "상품명", "공급사", "공급가"])
 
+    if "날짜" in previous_history.columns:
+        previous_history = previous_history[previous_history["날짜"].astype(str) != today_text].copy()
+
     price_history = pd.concat([previous_history, today_history], ignore_index=True)
     price_history = price_history.dropna(subset=["날짜", "상품명", "공급가"])
     price_history["공급가"] = pd.to_numeric(price_history["공급가"], errors="coerce")

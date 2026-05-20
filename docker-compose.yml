@@ -7,7 +7,7 @@ services:
     restart: unless-stopped
     environment:
       TZ: KST-9
-      B2B_RUN_AT: "09:00"
+      B2B_RUN_TIMES: "08:00,09:00,12:00,14:00,16:00,18:00,20:00,22:00"
       B2B_RUN_ON_START: "false"
       B2B_DOWNLOAD_DIR: /app/b2b_downloads
       B2B_OUTPUT_DIR: /app/output

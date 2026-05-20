@@ -24,14 +24,14 @@ cd /volume1/docker/b2b_excel
 PATH=/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin /usr/local/bin/docker-compose up -d --build
 ```
 
-기본 실행 시간은 매일 한국 시간 오전 9시입니다. 컨테이너 시간대는 `KST-9`로 설정되어 있습니다.
+기본 실행 시간은 매일 한국 시간 오전 9시입니다. NAS Docker 설정에서는 하루 8회 실행하도록 `B2B_RUN_TIMES`를 사용합니다. 컨테이너 시간대는 `KST-9`로 설정되어 있습니다.
 
 ## 3. 실행 시간 변경
 
-`docker-compose.yml`의 `B2B_RUN_AT` 값을 바꾸면 됩니다.
+`docker-compose.yml`의 `B2B_RUN_TIMES` 값을 바꾸면 됩니다.
 
 ```yaml
-B2B_RUN_AT: "08:30"
+B2B_RUN_TIMES: "08:00,09:00,12:00,14:00,16:00,18:00,20:00,22:00"
 ```
 
 변경 후 다시 적용합니다.
