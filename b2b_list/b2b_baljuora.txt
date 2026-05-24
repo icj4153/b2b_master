@@ -8,5 +8,10 @@ BALJUORA_COMPANIES = [
         "name": "우람씨푸드", 
         "url": "https://shop.baljuora.com/leejaehyeok24/signin", # 로그인하는 첫 화면 주소
         "list_url": "https://shop.baljuora.com/leejaehyeok24/products" # 사장님이 찾으신 다이렉트 주소!
+    },
+    {
+        "name": "농장을부탁해",
+        "url": "https://partners3.baljumoa.com/Login/Partners/pleasefarm",
+        "list_url": "https://partners3.baljumoa.com/ZProduct/GoodsList"
     }
 ]

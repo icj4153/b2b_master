@@ -2,6 +2,7 @@ import asyncio
 import ast
 import os
 import re
+import zipfile
 import pandas as pd
 import requests
 from datetime import datetime
@@ -66,6 +67,37 @@ RETRY_DELAY_SECONDS = 3
 def normalize_weight_value(value):
     text = str(value).strip()
     return re.sub(r'(kg|g)$', lambda match: match.group(1).lower(), text, flags=re.IGNORECASE)
+
+
+def sanitize_xlsx_styles(file_path):
+    """Fix invalid style color values that make openpyxl reject some downloaded xlsx files."""
+    path = Path(file_path)
+    temp_path = path.with_suffix(path.suffix + ".tmp")
+
+    try:
+        changed = False
+        with zipfile.ZipFile(path, "r") as source, zipfile.ZipFile(temp_path, "w", zipfile.ZIP_DEFLATED) as target:
+            for item in source.infolist():
+                data = source.read(item.filename)
+                if item.filename == "xl/styles.xml":
+                    original = data
+                    text = data.decode("utf-8")
+                    text = re.sub(
+                        r'rgb="([0-9A-Fa-f]{1,6})"',
+                        lambda match: f'rgb="FF{match.group(1).zfill(6)[-6:]}"',
+                        text,
+                    )
+                    data = text.encode("utf-8")
+                    changed = data != original
+                target.writestr(item, data)
+
+        if changed:
+            os.replace(temp_path, path)
+        else:
+            temp_path.unlink(missing_ok=True)
+    except Exception as exc:
+        temp_path.unlink(missing_ok=True)
+        print(f"[xlsx-sanitize] 스타일 보정 실패: {path} ({type(exc).__name__}: {exc})")
 
 # --- 1. 유틸리티 함수 (팝업 닫기, 파싱) ---
 
@@ -194,6 +226,18 @@ async def download_baljuora(context, company):
         await page.wait_for_load_state("networkidle")
         await asyncio.sleep(2)
         await close_all_popups(page)
+
+        if "partners3.baljumoa.com" in company["list_url"]:
+            print(f"[{company['name']}] 발주모아 파트너스 엑셀 다운로드 실행 중...")
+            async with page.expect_download() as download_info:
+                await page.evaluate("downloadExcel()")
+
+            download = await download_info.value
+            file_path = os.path.join(DOWNLOAD_DIR, f"{company['name']}_{datetime.now().strftime('%Y%m%d')}.xlsx")
+            await download.save_as(file_path)
+            sanitize_xlsx_styles(file_path)
+            print(f"[{company['name']}] ★ 발주모아 파트너스 엑셀 다운로드 성공!")
+            return True
 
         # 3. '엑셀 다운로드' 버튼 찾기 및 낚아채기
         excel_btn = page.get_by_text("엑셀 다운로드")
