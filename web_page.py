@@ -17,7 +17,7 @@ from env_utils import get_env
 from season_analyzer import SEASON_MAP
 
 # [필독] 무조건 1번 줄에 위치
-st.set_page_config(page_title="제철한가득 소싱 마스터", layout="wide")
+st.set_page_config(page_title="농수산물 소싱 마스터", layout="wide")
 
 # ---------------------------------------------------------
 # 네이버 API 출입증은 .env에서 읽습니다.
@@ -742,7 +742,7 @@ def render_keyword_category_buttons(keywords):
 # 📊 페이지 1: 실전 소싱 분석 (오리지널 복원)
 # ---------------------------------------------------------
 def render_analysis_page(df):
-    st.title("🍎 제철한가득 AI 소싱 마스터 v3.8")
+    st.title("🍎 농수산물 AI 소싱 마스터 v3.8")
     st.header("📅 월간 제철 캘린더 & 🤖 맞춤 전략 발굴기")
     supplier_links = load_supplier_links()
     
@@ -940,7 +940,7 @@ def render_calendar_page(df):
 # ---------------------------------------------------------
 df_main = load_latest_data()
 with st.sidebar:
-    st.title("👨‍🌾 제철한가득 지휘소")
+    st.title("👨‍🌾 농수산물 지휘소")
     menu = st.radio("🚩 메뉴 선택", ["실전 소싱 분석", "연간 제철 로드맵"])
 
 if menu == "실전 소싱 분석":

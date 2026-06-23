@@ -544,7 +544,7 @@ async def main():
     if not os.path.exists(DOWNLOAD_DIR): 
         os.makedirs(DOWNLOAD_DIR)
     
-    print("🚀 제철한가득 B2B 도매처 자동 수집 및 통합을 시작합니다...")
+    print("🚀 농수산물 B2B 도매처 자동 수집 및 통합을 시작합니다...")
 
     # [1~3] 엑셀 자동 다운로드 로직
     print(
