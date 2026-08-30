@@ -66,6 +66,7 @@ OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 TARGET_BTN_TEXT = "전체제품 엑셀 다운로드"
 OUTPUT_FILE = str(OUTPUT_DIR / f"전체품목_통합데이터_{datetime.now().strftime('%Y%m%d')}.xlsx")
 PRICE_HISTORY_CACHE_FILE = OUTPUT_DIR / "price_history.csv"
+LAST_CRAWL_TIMESTAMP_FILE = OUTPUT_DIR / "last_crawl_at.txt"
 BROWSER_DOWNLOAD_CONCURRENCY = 3
 GOOGLE_SHEET_CONCURRENCY = 8
 BALJUORA_DOWNLOAD_CONCURRENCY = 2
@@ -73,6 +74,13 @@ ADMIN_PLUS_DOWNLOAD_CONCURRENCY = BROWSER_DOWNLOAD_CONCURRENCY
 DIRECT_DOWNLOAD_CONCURRENCY = 2
 MAX_DOWNLOAD_RETRIES = 2
 RETRY_DELAY_SECONDS = 3
+
+
+def write_last_crawl_timestamp():
+    LAST_CRAWL_TIMESTAMP_FILE.write_text(
+        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        encoding="utf-8",
+    )
 
 
 def normalize_weight_value(value):
@@ -627,6 +635,7 @@ async def main():
     # [5] 전체 데이터 통합 (이미 완벽하게 세팅됨!)
     print("\n[전체 데이터 통합 및 파싱 시작]")
     integrate_data()
+    write_last_crawl_timestamp()
 
 if __name__ == "__main__":
     asyncio.run(main())

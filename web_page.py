@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import pandas as pd
 import os
 import urllib.request
@@ -28,8 +29,10 @@ BASE_DIR = Path(__file__).resolve().parent
 OUTPUT_DIR = Path(os.getenv("B2B_OUTPUT_DIR", str(BASE_DIR / "output")))
 LOG_DIR = Path(os.getenv("B2B_LOG_DIR", str(BASE_DIR / "logs")))
 PRICE_HISTORY_CACHE_FILE = OUTPUT_DIR / "price_history.csv"
+LAST_CRAWL_TIMESTAMP_FILE = OUTPUT_DIR / "last_crawl_at.txt"
 TREND_API_LAST_EVENTS = {}
 TREND_API_CACHE_TTL_SECONDS = 3600
+DASHBOARD_REFRESH_INTERVAL_SECONDS = int(os.getenv("B2B_DASHBOARD_REFRESH_SECONDS", "300"))
 # ---------------------------------------------------------
 
 GOOGLE_EXPORT_RE = re.compile(
@@ -214,12 +217,35 @@ def find_data_file():
 
 
 def get_latest_crawl_label():
+    if LAST_CRAWL_TIMESTAMP_FILE.exists():
+        timestamp_text = LAST_CRAWL_TIMESTAMP_FILE.read_text(encoding="utf-8").strip()
+        crawled_at = pd.to_datetime(timestamp_text, errors="coerce")
+        if not pd.isna(crawled_at):
+            return f"v{crawled_at.strftime('%Y-%m-%d %H시')}"
+
     file_path = find_data_file()
     if not file_path:
         return "v데이터 없음"
 
     crawled_at = datetime.fromtimestamp(file_path.stat().st_mtime)
     return f"v{crawled_at.strftime('%Y-%m-%d %H시')}"
+
+
+def enable_periodic_dashboard_refresh():
+    if DASHBOARD_REFRESH_INTERVAL_SECONDS <= 0:
+        return
+
+    components.html(
+        f"""
+        <script>
+        window.setTimeout(function () {{
+            window.parent.location.reload();
+        }}, {DASHBOARD_REFRESH_INTERVAL_SECONDS * 1000});
+        </script>
+        """,
+        height=0,
+        width=0,
+    )
 
 
 @st.cache_data
@@ -947,6 +973,7 @@ def render_calendar_page(df):
 # ---------------------------------------------------------
 # 🚩 메인 실행부
 # ---------------------------------------------------------
+enable_periodic_dashboard_refresh()
 df_main = load_latest_data()
 with st.sidebar:
     st.title("👨‍🌾 농수산물 지휘소")
