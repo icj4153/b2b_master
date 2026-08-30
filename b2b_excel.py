@@ -2,6 +2,7 @@ import asyncio
 import ast
 import os
 import re
+import sys
 import zipfile
 import pandas as pd
 import requests
@@ -11,6 +12,16 @@ from openpyxl import load_workbook
 from playwright.async_api import async_playwright
 from env_utils import get_required_env
 from season_analyzer import add_seasonality_columns
+
+
+def configure_console_encoding():
+    """Prevent Windows cp949 consoles from crashing on emoji/status output."""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(errors="replace")
+
+
+configure_console_encoding()
 
 # [설정 1] 사장님 정보
 USER_ID = get_required_env("B2B_USER_ID")
