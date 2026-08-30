@@ -216,10 +216,10 @@ def find_data_file():
 def get_latest_crawl_label():
     file_path = find_data_file()
     if not file_path:
-        return "마지막 크롤링: 데이터 없음"
+        return "v데이터 없음"
 
     crawled_at = datetime.fromtimestamp(file_path.stat().st_mtime)
-    return f"마지막 크롤링: {crawled_at.strftime('%Y-%m-%d %H:%M')}"
+    return f"v{crawled_at.strftime('%Y-%m-%d %H시')}"
 
 
 @st.cache_data
@@ -751,7 +751,7 @@ def render_keyword_category_buttons(keywords):
 # 📊 페이지 1: 실전 소싱 분석 (오리지널 복원)
 # ---------------------------------------------------------
 def render_analysis_page(df):
-    st.title(f"🍎 농수산물 AI 소싱 마스터 · {get_latest_crawl_label()}")
+    st.title(f"농수산물 AI 소싱 마스터 {get_latest_crawl_label()}")
     st.header("📅 월간 제철 캘린더 & 🤖 맞춤 전략 발굴기")
     supplier_links = load_supplier_links()
     
