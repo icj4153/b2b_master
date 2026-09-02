@@ -4,6 +4,7 @@ import os
 import re
 import sys
 import zipfile
+from bs4 import BeautifulSoup
 import pandas as pd
 import requests
 from datetime import datetime
@@ -59,6 +60,7 @@ ADMIN_PLUS_COMPANIES = load_company_config("b2b_admin.txt", "ADMIN_PLUS_COMPANIE
 GOOGLE_SHEET_COMPANIES = load_company_config("b2b_google_sheet.txt", "GOOGLE_SHEET_COMPANIES")
 BALJUORA_COMPANIES = load_company_config("b2b_baljuora.txt", "BALJUORA_COMPANIES")
 DIRECT_DOWNLOAD_COMPANIES = load_company_config("b2b_direct.txt", "DIRECT_DOWNLOAD_COMPANIES")
+SPECIAL_SITE_COMPANIES = load_company_config("b2b_special.txt", "SPECIAL_SITE_COMPANIES")
 
 DOWNLOAD_DIR = os.getenv("B2B_DOWNLOAD_DIR", str(BASE_DIR / "b2b_downloads"))
 OUTPUT_DIR = Path(os.getenv("B2B_OUTPUT_DIR", str(BASE_DIR / "output")))
@@ -72,8 +74,14 @@ GOOGLE_SHEET_CONCURRENCY = 8
 BALJUORA_DOWNLOAD_CONCURRENCY = 2
 ADMIN_PLUS_DOWNLOAD_CONCURRENCY = BROWSER_DOWNLOAD_CONCURRENCY
 DIRECT_DOWNLOAD_CONCURRENCY = 2
+SPECIAL_SITE_DOWNLOAD_CONCURRENCY = 2
 MAX_DOWNLOAD_RETRIES = 2
 RETRY_DELAY_SECONDS = 3
+STANDARD_BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/139.0.0.0 Safari/537.36"
+)
 
 
 def write_last_crawl_timestamp():
@@ -119,6 +127,35 @@ def sanitize_xlsx_styles(file_path):
         print(f"[xlsx-sanitize] 스타일 보정 실패: {path} ({type(exc).__name__}: {exc})")
 
 # --- 1. 유틸리티 함수 (팝업 닫기, 파싱) ---
+
+
+def save_dataframe_as_download(company_name, df):
+    file_path = os.path.join(DOWNLOAD_DIR, f"{company_name}_{datetime.now().strftime('%Y%m%d')}.xlsx")
+    df.to_excel(file_path, index=False)
+    return file_path
+
+
+def parse_first_html_table(html_text):
+    soup = BeautifulSoup(html_text, "html.parser")
+    table = soup.find("table")
+    if table is None:
+        raise ValueError("HTML 응답에서 table을 찾을 수 없습니다.")
+
+    table_rows = []
+    for tr in table.find_all("tr"):
+        cells = [cell.get_text("\n", strip=True) for cell in tr.find_all(["th", "td"], recursive=False)]
+        if any(cells):
+            table_rows.append(cells)
+
+    if len(table_rows) < 2:
+        raise ValueError("HTML table에 데이터 행이 없습니다.")
+
+    headers = table_rows[0]
+    data_rows = [row for row in table_rows[1:] if len(row) == len(headers)]
+    if not data_rows:
+        raise ValueError("HTML table의 컬럼 수가 맞는 데이터 행이 없습니다.")
+
+    return pd.DataFrame(data_rows, columns=headers)
 
 async def close_all_popups(page):
     popup_selectors = ["text='하루 동안 이 창을 열지 않습니다'", "text='오늘 하루 열지 않기'", "text='닫기'", ".btn-close", "area[alt*='닫기']"]
@@ -370,6 +407,129 @@ async def download_direct(context, company):
         await page.close()
 
 
+def get_choigozip_shipping_fee(product):
+    if product.get("shippingFee") is not None:
+        return product["shippingFee"]
+
+    shipping_policy = product.get("shippingPolicy") or {}
+    if shipping_policy.get("type") == "FREE":
+        return 0
+
+    return shipping_policy.get("baseAmount") or 0
+
+
+async def fetch_choigozip_wholesale(context, company):
+    print(f"[{company['name']}] 공개 상품 API 수집 중...")
+    page = await context.new_page()
+    captured_pages = {}
+    total_pages = None
+
+    async def capture_products_response(response):
+        nonlocal total_pages
+        if "/api/public/products?" not in response.url:
+            return
+        if response.status != 200:
+            print(f"[{company['name']}] 공개 상품 API 응답 실패: HTTP {response.status}")
+            return
+        try:
+            payload = await response.json()
+        except Exception as exc:
+            print(f"[{company['name']}] 공개 상품 API JSON 파싱 실패: {type(exc).__name__}: {exc}")
+            return
+
+        page_number = payload.get("number")
+        if page_number is not None:
+            captured_pages[page_number] = payload.get("content") or []
+        total_pages = payload.get("totalPages") or total_pages
+
+    page.on("response", lambda response: asyncio.create_task(capture_products_response(response)))
+
+    try:
+        await page.goto(company["url"], wait_until="domcontentloaded", timeout=30000)
+        await page.wait_for_timeout(8000)
+
+        next_button = page.locator("button").filter(has_text="다음").last
+        for _ in range(20):
+            if total_pages and len(captured_pages) >= total_pages:
+                break
+            if not await next_button.is_visible(timeout=3000) or await next_button.is_disabled(timeout=3000):
+                break
+            await next_button.click()
+            await page.wait_for_timeout(3000)
+    finally:
+        await page.close()
+
+    rows = []
+    seen_ids = set()
+    for page_number in sorted(captured_pages):
+        for product in captured_pages[page_number]:
+            product_id = product.get("id") or product.get("publicCode") or product.get("name")
+            if product_id in seen_ids:
+                continue
+            seen_ids.add(product_id)
+            rows.append({
+                "상품명": product.get("name"),
+                "옵션명": "",
+                "공급가": product.get("supplyPrice"),
+                "배송비": get_choigozip_shipping_fee(product),
+                "카테고리": product.get("categoryName"),
+                "품절": product.get("allOptionsSoldOut") or product.get("stockType") == "SOLD_OUT",
+            })
+
+    if not rows:
+        print(f"[{company['name']}] 에러: 공개 상품 API에서 상품을 찾지 못했습니다.")
+        return False
+
+    df = pd.DataFrame(rows)
+    file_path = save_dataframe_as_download(company["name"], df)
+    print(f"[{company['name']}] ★ 공개 상품 API 수집 성공! ({len(df):,} rows, {file_path})")
+    return True
+
+
+def fetch_walldo_excel(company):
+    print(f"[{company['name']}] 로그인 후 상품전체다운로드 실행 중...")
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": STANDARD_BROWSER_USER_AGENT,
+        "Accept-Language": "ko-KR,ko;q=0.9",
+    })
+
+    session.get(company["url"], timeout=30)
+    login_response = session.post(
+        company["login_url"],
+        data={
+            "mb_id": USER_ID,
+            "mb_password": USER_PW,
+            "url": company.get("login_redirect", "%2Fshop%2Flist.php%3Fca_id%3D80"),
+        },
+        timeout=30,
+        allow_redirects=True,
+    )
+    login_response.raise_for_status()
+
+    download_response = session.get(company["download_url"], timeout=60)
+    download_response.raise_for_status()
+    df = parse_first_html_table(download_response.content.decode("utf-8", errors="replace"))
+    file_path = save_dataframe_as_download(company["name"], df)
+    print(f"[{company['name']}] ★ 상품전체다운로드 성공! ({len(df):,} rows, {file_path})")
+    return True
+
+
+async def download_special_site(context, company):
+    kind = company.get("kind")
+    try:
+        if kind == "choigozip_public_api":
+            return await fetch_choigozip_wholesale(context, company)
+        if kind == "walldo_html_excel":
+            return await asyncio.to_thread(fetch_walldo_excel, company)
+
+        print(f"[{company['name']}] 에러: 알 수 없는 특수 사이트 종류입니다. kind={kind}")
+        return False
+    except Exception as e:
+        print(f"[{company['name']}] 처리 중 오류: {e}")
+        return False
+
+
 import gc  # 🗑️ 메모리 강제 청소를 위해 상단 추가
 
 
@@ -472,7 +632,7 @@ def integrate_data():
                     opt_col = None 
 
                 if name_col:
-                    if opt_col and "트라이365" in supplier:
+                    if opt_col and any(name in supplier for name in ["트라이365", "최고집 홀세일", "월억도전"]):
                         df[name_col] = df[name_col].ffill()
                         df['상품명'] = df[name_col].astype(str) + " " + df[opt_col].astype(str).replace("nan", "")
                     else:
@@ -571,7 +731,8 @@ async def main():
         f"admin={len(ADMIN_PLUS_COMPANIES)}, "
         f"google_sheet={len(GOOGLE_SHEET_COMPANIES)}, "
         f"baljuora={len(BALJUORA_COMPANIES)}, "
-        f"direct={len(DIRECT_DOWNLOAD_COMPANIES)}"
+        f"direct={len(DIRECT_DOWNLOAD_COMPANIES)}, "
+        f"special={len(SPECIAL_SITE_COMPANIES)}"
     )
     google_sheet_task = asyncio.create_task(
         run_limited_downloads(
@@ -586,7 +747,9 @@ async def main():
         browser = await p.chromium.launch(headless=True) 
         context = await browser.new_context(
             accept_downloads=True,
-            viewport={'width': 1920, 'height': 1080}
+            viewport={'width': 1920, 'height': 1080},
+            user_agent=STANDARD_BROWSER_USER_AGENT,
+            locale="ko-KR",
         )
 
         # 1. 발주오라 계열 업체 다운로드
@@ -622,17 +785,28 @@ async def main():
         except NameError:
             pass
 
+        # 4. 사이트별 별도 다운로드 방식
+        try:
+            await run_limited_downloads(
+                SPECIAL_SITE_COMPANIES,
+                download_special_site,
+                SPECIAL_SITE_DOWNLOAD_CONCURRENCY,
+                context,
+            )
+        except NameError:
+            pass
+
         await browser.close()
         print("\n✅ 모든 도매처 엑셀 자동 다운로드가 완료되었습니다!")
     
-    # [4] 브라우저 없이 빠르게 다운받는 구글 시트 업체 추가! 🌟
+    # [5] 브라우저 없이 빠르게 다운받는 구글 시트 업체 추가! 🌟
     try:
         # 사장님이 설정해두신 구글시트 리스트 이름(예: GOOGLE_SHEET_COMPANIES)에 맞춰주세요.
         await google_sheet_task
     except NameError:
         pass
 
-    # [5] 전체 데이터 통합 (이미 완벽하게 세팅됨!)
+    # [6] 전체 데이터 통합 (이미 완벽하게 세팅됨!)
     print("\n[전체 데이터 통합 및 파싱 시작]")
     integrate_data()
     write_last_crawl_timestamp()

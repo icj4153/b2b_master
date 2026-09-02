@@ -1,0 +1,15 @@
+SPECIAL_SITE_COMPANIES = [
+    {
+        "name": "최고집 홀세일",
+        "kind": "choigozip_public_api",
+        "url": "https://partner.choigozip.co.kr/"
+    },
+    {
+        "name": "월억도전",
+        "kind": "walldo_html_excel",
+        "url": "https://walldob2b.com/shop/list.php?ca_id=80",
+        "login_url": "https://walldob2b.com/bbs/login_check.php",
+        "download_url": "https://walldob2b.com/theme/jelly/shop/product_excel_download.php",
+        "login_redirect": "%2Fshop%2Flist.php%3Fca_id%3D80"
+    }
+]

@@ -4,3 +4,4 @@ openpyxl
 playwright
 streamlit
 altair
+beautifulsoup4

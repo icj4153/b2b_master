@@ -165,6 +165,7 @@ def load_supplier_links():
         "b2b_google_sheet.txt": "GOOGLE_SHEET_COMPANIES",
         "b2b_baljuora.txt": "BALJUORA_COMPANIES",
         "b2b_direct.txt": "DIRECT_DOWNLOAD_COMPANIES",
+        "b2b_special.txt": "SPECIAL_SITE_COMPANIES",
     }
     links = {}
 
